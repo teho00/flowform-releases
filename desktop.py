@@ -2,6 +2,7 @@
 
 import argparse
 import ctypes
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -62,12 +63,23 @@ def main():
     url = f"http://127.0.0.1:{args.port}"
     ensure_server(url, args.port, args.runs_dir.resolve())
 
+    release_config = ROOT / "update-release.json"
+    title = "FlowForm · CAD & CFD"
+    if release_config.is_file():
+        try:
+            installed_version = json.loads(release_config.read_text(encoding="utf-8-sig"))["current_version"]
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+        else:
+            if isinstance(installed_version, str):
+                title = f"FlowForm v{installed_version} · CAD & CFD"
+
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("FlowForm.CadCfd")
     webview.settings["ALLOW_DOWNLOADS"] = True
     window = webview.create_window(
-        "FlowForm · CAD & CFD", url + "/" + args.page,
+        title, url + "/" + args.page,
         width=1440, height=900, min_size=(800, 560), maximized=True,
-        background_color="#101418", text_select=True, zoomable=True,
+        background_color="#080d18", text_select=True, zoomable=True,
     )
     def set_window_icon():
         from System.Drawing import Icon
@@ -76,7 +88,6 @@ def main():
 
     window.events.before_show += set_window_icon
     # Use a separate persistent profile for project autosave and workspace preferences.
-    release_config = ROOT / "update-release.json"
     menu = None
     if release_config.is_file():
         from webview.menu import MenuAction

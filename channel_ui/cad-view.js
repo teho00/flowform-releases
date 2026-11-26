@@ -437,7 +437,7 @@ export function createViewport(canvas, {
   onSketchCreate, onSketchEdit, onSketchMove, onSketchPull, onSketchSelect, onFillet, onDirectPreview, onDirectCommit, onDimensionPick,
   onSketchToolPick, previewSketchEdit, inspectMesh = false,
 } = {}) {
-  const gl = canvas.getContext('webgl', {alpha: false, antialias: true});
+  const gl = canvas.getContext('webgl', {alpha: true, antialias: true});
   if (!gl) throw new Error('이 브라우저에서 WebGL 3D 뷰포트를 열 수 없습니다.');
   const program = linkProgram(gl);
   gl.useProgram(program);
@@ -454,8 +454,8 @@ export function createViewport(canvas, {
   gl.enable(gl.DEPTH_TEST);
   gl.depthFunc(gl.LEQUAL);
   gl.enable(gl.BLEND);
-  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-  gl.clearColor(0.048, 0.074, 0.115, 1);
+  gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+  gl.clearColor(0, 0, 0, 0);
 
   let name = 'iso';
   let [azimuth, elevation] = VIEWS.iso;

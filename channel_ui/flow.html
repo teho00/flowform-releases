@@ -10,7 +10,7 @@
   <link rel="icon" type="image/svg+xml" href="/flowform.svg">
   <link rel="stylesheet" href="/workspace.css">
 </head>
-<body>
+<body class="flow-workspace">
   <header class="studio-head">
     <a class="studio-brand" href="/cad" aria-label="FlowForm CAD"><img class="studio-mark" src="/flowform.svg" width="29" height="29" alt="">FlowForm</a>
     <nav aria-label="작업공간"><a href="/cad">3D CAD</a><a href="/flow" aria-current="page">OpenFOAM CFD</a></nav>
@@ -18,11 +18,11 @@
 
   <main class="wrap"><div class="workspace-title"><h1>유동해석</h1>
     <nav class="section-jumps" aria-label="CFD 작업 단계">
-      <a href="#setup-title" data-step="setup">1. 형상·조건</a>
-      <a href="#mesh-results" data-step="mesh">2. 격자</a>
-      <a href="#run-progress" data-step="run">3. 실행</a>
-      <a href="#results-title" data-step="results">4. 결과</a>
-      <a href="#history-title" data-step="history">실행 기록</a>
+      <a href="#setup-title" data-step="setup"><span class="step-index" aria-hidden="true">01</span>형상·조건</a>
+      <a href="#mesh-results" data-step="mesh"><span class="step-index" aria-hidden="true">02</span>격자</a>
+      <a href="#run-progress" data-step="run"><span class="step-index" aria-hidden="true">03</span>실행</a>
+      <a href="#results-title" data-step="results"><span class="step-index" aria-hidden="true">04</span>결과</a>
+      <a href="#history-title" data-step="history"><span class="step-index" aria-hidden="true">05</span>실행 기록</a>
     </nav></div>
     <p id="request-error" class="notice error" role="alert" hidden></p>
 

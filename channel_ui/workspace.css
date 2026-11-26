@@ -1,81 +1,189 @@
 :root {
-  --canvas: #101418;
+  --canvas: #080d18;
   --background: var(--canvas);
-  --surface: #192026;
+  --surface: #101a2b;
   --panel: var(--surface);
-  --field: #12181d;
-  --raised: #222c33;
-  --line: #354149;
-  --line-strong: #52626d;
-  --ink: #eff4f5;
+  --field: #0b1423;
+  --raised: #18253a;
+  --line: #253950;
+  --line-strong: #395672;
+  --ink: #eef5ff;
   --text: var(--ink);
-  --muted: #adbbc1;
-  --accent: #8de2dc;
-  --accent-line: #549c99;
-  --accent-tint: #203d3f;
+  --muted: #a9bbd1;
+  --accent: #61e4f5;
+  --accent-line: #3b9fb6;
+  --accent-tint: #103044;
   --accent-field: var(--accent-tint);
+  --on-accent: #071421;
+  --workspace-gutter: clamp(10px, 1.7vw, 26px);
+  --panel-edge: #2b5068;
+  --panel-shadow: 0 10px 25px #0004, 0 0 22px #24c9f008;
+  --action-fill: linear-gradient(115deg, #64e9f1, #69b8fc);
+  --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+
+.cad-workspace, .flow-workspace {
+  min-height: 100dvh;
+  background: radial-gradient(ellipse at 15% 0%, #112b43 0%, transparent 45%), var(--canvas);
 }
 
 .studio-head {
   display: flex;
   align-items: center;
-  gap: clamp(16px, 4vw, 64px);
-  min-height: 62px;
-  padding: 0 clamp(14px, 3vw, 48px);
-  background: #141a1e;
+  gap: clamp(16px, 3vw, 45px);
+  min-height: 66px;
+  padding: 8px var(--workspace-gutter);
+  background: linear-gradient(100deg, #101d30, #0b1423);
   border-bottom: 1px solid var(--line);
 }
 .studio-brand, .studio-head nav a, .section-jumps a { text-decoration: none; }
 .studio-brand {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   color: var(--ink);
-  font: 700 17px/1 system-ui, sans-serif;
+  font: 750 19px/1 system-ui, sans-serif;
 }
 .studio-mark {
   display: block;
   flex: none;
+  filter: drop-shadow(0 0 8px #38c6f458);
 }
-.studio-brand small { color: var(--muted); font: 12px monospace; }
-.studio-head nav { display: flex; align-self: stretch; align-items: stretch; gap: 5px; }
-.studio-head nav a {
-  display: grid;
+.studio-head nav {
+  display: flex;
   align-items: center;
-  padding: 8px 12px;
-  border-bottom: 2px solid transparent;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--field);
+}
+.studio-head nav a {
+  padding: 7px 13px;
+  border: 1px solid transparent;
+  border-radius: 8px;
   color: var(--muted);
   font: 600 14px/1.4 system-ui, sans-serif;
   white-space: nowrap;
 }
-.studio-head nav a:hover, .section-jumps a:hover { background: var(--raised); color: var(--ink); }
-.studio-head nav a[aria-current] { border-color: var(--accent); color: var(--accent); }
+.studio-head nav a:hover { background: var(--raised); color: var(--ink); }
+.studio-head nav a[aria-current="page"] {
+  border-color: var(--panel-edge);
+  background: var(--accent-tint);
+  box-shadow: inset 0 -2px var(--accent-line);
+  color: var(--accent);
+}
 .studio-head > [role=status] { margin-left: auto; }
+.studio-head .status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+}
+.studio-head .status-pill::before {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  content: "";
+}
 .workspace-title, .section-jumps { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
-.workspace-title { justify-content: space-between; margin: 0 0 18px; }
-.workspace-title h1 { font-size: clamp(1.4rem, 2.3vw, 1.9rem); }
-.section-jumps { gap: 2px; }
-.section-jumps a { padding: 6px 9px; color: var(--muted); border-radius: 5px; font-size: .82rem; }
-.card { border-radius: 10px; box-shadow: none; }
+.workspace-title { justify-content: flex-start; gap: 12px 24px; margin: 0 0 18px; }
+.workspace-title h1 { font-size: clamp(1.5rem, 2.4vw, 2rem); }
+.section-jumps { gap: 6px; }
+.section-jumps a {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 40px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--raised);
+  color: var(--muted);
+  font-size: .83rem;
+  white-space: nowrap;
+}
+.step-index {
+  padding: 3px 5px;
+  border-radius: 5px;
+  background: var(--field);
+  color: var(--muted);
+  font: 650 .72rem/1.1 var(--mono);
+}
+.section-jumps a:hover { border-color: var(--line-strong); color: var(--ink); }
+.section-jumps [aria-current="step"] {
+  border-color: var(--accent-line);
+  background: var(--accent-tint);
+  color: var(--ink);
+  box-shadow: 0 0 14px #45c6ee1c;
+}
+.section-jumps [aria-current="step"] .step-index { background: var(--accent); color: var(--on-accent); }
+.card, .pane, .scene {
+  border-color: var(--panel-edge);
+  border-radius: 14px;
+  background: linear-gradient(145deg, #132035, var(--panel) 52%);
+  box-shadow: var(--panel-shadow);
+}
+.flow-workspace .wrap { width: min(1450px, calc(100% - 2 * var(--workspace-gutter))); }
+.flow-workspace .section-head { min-height: 30px; }
+.flow-workspace .flow-layout { gap: 14px; }
+.flow-workspace input[type="number"], .flow-workspace output, .flow-workspace .metrics dd,
+.flow-workspace .contour-values, .model-stats dd { font-family: var(--mono); }
+.flow-workspace :is(.field input, .field select, .axis-select select) {
+  min-height: 36px;
+  border-radius: 8px;
+  background: var(--field);
+}
+.flow-workspace .metrics div { border-color: var(--panel-edge); border-radius: 10px; background: #0e2033; }
+.flow-workspace .metrics dd { color: var(--accent); overflow-wrap: anywhere; }
+.flow-workspace .domain-viewport { border-color: var(--panel-edge); border-radius: 11px; }
+.flow-workspace :is(#log-text, .chart-section svg) { border-radius: 8px; }
+.flow-workspace .run-actions .mesh-secondary { color: var(--accent); background: var(--raised); }
 .card:target, section:has(> .section-head > h2:target) { border-color: var(--accent-line); }
 [id]:target { scroll-margin-top: 12px; }
 .sidebar #history-list { max-height: 330px; overflow-y: auto; scrollbar-width: thin; }
-.toolbar { align-items: stretch; gap: 8px 14px; background: #171d22; }
+.toolbar {
+  align-items: stretch;
+  gap: 7px 14px;
+  margin: 10px var(--workspace-gutter) 0;
+  padding: 9px 12px;
+  border: 1px solid var(--panel-edge);
+  border-radius: 12px;
+  background: #111d30;
+  box-shadow: var(--panel-shadow);
+}
 .tool-group { align-content: start; gap: 4px; }
 .ribbon-label {
   flex-basis: 100%;
-  color: var(--muted);
+  color: #a8c2dc;
   font-size: .72rem;
   font-weight: 650;
 }
-.tool-group button { min-height: 29px; background: transparent; border-color: transparent; }
+.tool-group button { min-height: 30px; border-radius: 7px; background: var(--field); border-color: var(--line); }
 .tool-group button:hover:enabled { background: var(--raised); border-color: var(--line); }
 .tool-group button[aria-pressed=true] { background: var(--accent-field); border-color: var(--accent-line); }
 .tool-group { width: max-content; }
-.pane-heading, .scene-header { background: #1d262d; }
+.pane-heading, .scene-header { background: linear-gradient(100deg, #192d45, #112036); }
+.pane-heading h1, .pane-section h2 { color: var(--ink); }
+.part-card { margin: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--field); }
+.part-card > p { color: var(--accent); }
+.viewport { background: radial-gradient(ellipse at 46% 26%, #172e48 0%, #0c1729 55%, #080f1c 100%); }
+.scene .workspace-mode { border-color: var(--panel-edge); border-radius: 7px; }
+.scene .workspace-mode[data-mode="sketch"] { border-color: var(--accent-line); }
+.view-actions button[aria-pressed="true"] { border-color: var(--accent-line); }
 .model-stats > div { display: flex; justify-content: space-between; gap: 8px; }
 .model-stats dd { text-align: right; }
-#open-flow:enabled { background: var(--accent); border-color: var(--accent); color: #133032; }
+.cad-workspace .primary, .flow-workspace .primary:not(.mesh-secondary), #open-flow:enabled {
+  border-color: transparent;
+  border-radius: 8px;
+  background: var(--action-fill);
+  color: var(--on-accent);
+}
+.cad-workspace .primary:hover:enabled, .flow-workspace .primary:not(.mesh-secondary):hover:enabled,
+#open-flow:hover:enabled { background: linear-gradient(115deg, #8cf3f9, #91cbff); }
 .export-menu summary { cursor: pointer; font-size: .85rem; font-weight: 650; }
 .export-menu[open] summary { margin-bottom: 10px; }
 .export-menu:not([open]) > button { display: none; }
@@ -86,16 +194,26 @@
 #live-message:not(:empty) { margin-top: 8px; }
 #frame-time { color: var(--accent); font-size: .8rem; font-variant-numeric: tabular-nums; }
 @media (min-width: 966px) {
-  .workbench { height: calc(100dvh - 142px); min-height: 530px; }
+  .cad-workspace { display: flex; flex-direction: column; height: 100dvh; }
+  .cad-workspace > :not(.workbench) { flex: none; }
+  .workbench { flex: 1; height: auto; min-height: 530px; padding-inline: var(--workspace-gutter); }
+}
+@media (min-width: 966px) and (max-height: 740px) {
+  .cad-workspace .studio-head { min-height: 56px; }
+  .cad-workspace .workbench { min-height: 460px; }
+  .cad-workspace .viewport { min-height: 330px; }
 }
 @media (max-width: 700px) {
-  .studio-head { flex-wrap: wrap; gap: 2px 12px; padding-top: 10px; }
-  .studio-head nav { order: 1; width: 100%; }
-  .studio-head nav a { padding: 9px 8px; }
-  .section-jumps { gap: 0; }
-  .section-jumps a { padding-inline: 6px; }
-  .toolbar { flex-wrap: nowrap; overflow-x: auto; }
+  .studio-head { flex-wrap: wrap; gap: 8px 12px; }
+  .studio-head nav a { padding: 6px 8px; }
+  .section-jumps a { padding-inline: 8px; }
+  .toolbar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; }
   .tool-group { flex: none; }
+}
+@media (max-width: 440px) {
+  .cad-workspace .studio-head nav { order: 1; width: 100%; }
+  .cad-workspace .studio-head nav a { flex: 1; text-align: center; }
+  .flow-workspace .section-jumps { display: grid; grid-template-columns: repeat(3, max-content); }
 }
 .review-tools { display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:8px 10px; border:1px solid var(--line); border-radius:6px; background:var(--panel); color:var(--text); font-size:.82rem; }
 .review-tools label { display:inline-flex; align-items:center; gap:6px; }

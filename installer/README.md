@@ -8,11 +8,15 @@
 
 ## 새 버전 게시
 
-HTTPS 서버에 설치 EXE와 서명한 release.json을 게시합니다.
+버전 형식은 `주.부.패치`입니다. 호환성을 깨는 변경은 주 버전, 주요 기능 추가와 작업공간 개편은 부 버전, 작은 수정은 패치 버전으로 구분합니다. 공개 버전은 중복 사용하지 않습니다.
 
-1. cryptography가 설치된 Python으로 installer/publish_update.py init-key <개인 폴더의 키 경로.pem>을 실행합니다. 출력되는 값은 공개 키입니다. 개인 키는 배포 서버나 설치판에 넣지 않습니다.
-2. build-windows.ps1에 Version, ManifestUrl, UpdatePublicKey를 전달해 설치 파일을 만듭니다. 기존 설치판은 %LOCALAPPDATA%\FlowFormInstalled\update-channel.json에 manifest_url과 public_key를 지정해도 됩니다.
-3. installer/publish_update.py sign <키 경로> <설치 파일> <버전> <설치 파일 HTTPS 주소> <release.json 경로>로 서명된 매니페스트를 만듭니다. 설치 파일을 먼저 게시한 뒤 release.json을 올립니다. 버전은 설치 파일의 버전과 일치해야 합니다.
+이번 UI 개편 버전은 `0.2.1`입니다. GitHub 태그는 `v0.2.1`, 릴리스 제목은 `FlowForm v0.2.1 — UI 개선`, 설치 파일은 `FlowForm-0.2.1-Windows-x64-Setup.exe`, 소스 파일은 `FlowForm-0.2.1-Source.zip`입니다. 앱 제목 표시줄과 업데이트 정보에는 설치 파일을 빌드할 때 지정한 버전이 표시됩니다.
+
+GitHub Releases 초안에 설치 파일, 대응 소스 파일, 서명한 `release.json`을 함께 올린 뒤 최신 릴리스로 게시합니다.
+
+1. 채널을 처음 만들 때만 `installer/publish_update.py init-key`로 서명 키를 생성합니다. 이후 릴리스에서도 같은 개인 키로 서명합니다. 개인 키는 배포 서버나 설치판에 넣지 않습니다.
+2. `build-windows.ps1`에 `Version`, `ManifestUrl`, `UpdatePublicKey`를 전달합니다. 공개판의 `ManifestUrl`은 `https://github.com/teho00/flowform-releases/releases/latest/download/release.json`입니다.
+3. `installer/publish_update.py sign <키 경로> <설치 파일> <버전> <설치 파일 HTTPS 주소> <release.json 경로>`로 업데이트 정보에 서명합니다. 설치 파일 주소에는 버전별 GitHub 태그를 사용합니다. 태그, 설치 파일 이름, 내부 버전이 같은 번호인지 확인한 뒤 게시합니다.
 4. 앱의 **업데이트 확인**에서 새 버전을 승인하면 앱이 HTTPS로 내려받고 Ed25519 서명과 설치 파일의 SHA-256을 검증합니다. 진행 중인 해석이 없으면 설치 후 앱을 다시 엽니다.
 
 Windows Authenticode 코드 서명과 릴리스 매니페스트 서명은 별개입니다. 현재 설치 파일은 Windows 코드 서명 인증서 없이 빌드했습니다.
