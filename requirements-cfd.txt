@@ -1,0 +1,3 @@
+-r requirements-cad.txt
+gmsh==4.15.2
+numpy>=1.26,<3

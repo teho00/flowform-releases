@@ -1,0 +1,10 @@
+{
+  "length_m": 0.02,
+  "height_m": 0.001,
+  "extrusion_m": 0.001,
+  "rho_kg_m3": 1.2,
+  "nu_m2_s": 1.5e-05,
+  "u_mean_m_s": 1.0,
+  "nx": 200,
+  "ny": 20
+}

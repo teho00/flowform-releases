@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.venv/
+.cad-venv/
+demo-runs/
+runs/
+build/
+dist/
+*.pem
+*.pfx
+update-channel.json
+update-release.json

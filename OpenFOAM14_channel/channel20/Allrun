@@ -1,0 +1,29 @@
+#!/bin/sh
+set -eu
+cd "$(dirname "$0")"
+
+if [ "$(printenv WM_PROJECT_VERSION || true)" != "14" ]; then
+    echo "First load OpenFOAM Foundation v14 in your shell: source /opt/openfoam14/etc/bashrc" >&2
+    exit 1
+fi
+for app in blockMesh checkMesh foamRun foamPostProcess python3; do
+    command -v "$app" >/dev/null || { echo "Missing command: $app" >&2; exit 1; }
+done
+run_logged() {
+    logfile=$1
+    shift
+    echo "Running $*; see $logfile"
+    if ! "$@" > "$logfile" 2>&1; then
+        tail -30 "$logfile" >&2
+        exit 1
+    fi
+}
+run_logged log.blockMesh blockMesh
+run_logged log.checkMesh checkMesh
+if ! grep -q 'Mesh OK' log.checkMesh; then
+    tail -30 log.checkMesh >&2
+    exit 1
+fi
+run_logged log.foamRun foamRun
+run_logged log.centres foamPostProcess -latestTime -func writeCellCentres
+python3 analyse.py

@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>3D CAD · FlowForm</title>
+  <link rel="stylesheet" href="/cad.css">
+  <script type="module" src="/cad.js"></script>
+  <link rel="icon" type="image/svg+xml" href="/flowform.svg">
+  <link rel="stylesheet" href="/workspace.css">
+</head>
+<body>
+  <header class="studio-head">
+    <a class="studio-brand" href="/cad" aria-label="FlowForm CAD"><img class="studio-mark" src="/flowform.svg" width="29" height="29" alt="">FlowForm</a>
+    <nav aria-label="작업공간"><a href="/cad" aria-current="page">3D CAD</a><a href="/flow">OpenFOAM CFD</a></nav>
+    <span class="status-pill" id="cad-status" role="status">커널 확인 중</span>
+  </header>
+
+  <div class="toolbar" aria-label="CAD 도구">
+    <div class="tool-group">
+      <span class="ribbon-label">파일</span>
+      <button type="button" id="new-project" title="새 프로젝트">새 모델</button>
+      <button type="button" id="import-step" title="STEP 솔리드 가져오기">STEP 가져오기</button>
+      <button type="button" id="open-project" title="저장한 작업 파일 열기">열기</button>
+      <button type="button" id="save-project" title="편집 이력이 포함된 CAD 작업 파일 저장">저장</button>
+      <input type="file" id="step-file" accept=".step,.stp" hidden>
+      <input type="file" id="project-file" accept=".json" hidden>
+    </div>
+    <div class="tool-group" aria-label="스케치 평면">
+      <span class="ribbon-label">작업 모드</span>
+      <button type="button" id="sketch-mode" title="선택한 면 또는 마지막 스케치 편집 (K)" aria-keyshortcuts="K">스케치 편집</button>
+      <button type="button" id="new-sketch-xy" aria-controls="reference-plane-picker">기준면 스케치</button>
+      <button type="button" id="new-sketch-face" title="먼저 3D 솔리드에서 평면 면을 선택하세요">선택면 스케치</button>
+      <button type="button" id="finish-sketch" class="minor" title="3D 모델링으로 돌아가기 (D)" aria-keyshortcuts="D" hidden>3D 모델링으로 돌아가기</button>
+      <button type="button" id="activate-pull" title="3D 돌출·절삭 및 면 편집 (P)" aria-keyshortcuts="P">당기기</button>
+    </div>
+    <div class="tool-group" aria-label="스케치 도구">
+      <span class="ribbon-label">스케치 도구</span>
+      <button type="button" id="sketch-select" data-sketch-tool="select" title="선택 (S)" aria-keyshortcuts="S">선택</button>
+      <button type="button" id="sketch-move" data-sketch-tool="move" title="스케치 이동 (M)" aria-keyshortcuts="M" hidden>이동</button>
+      <button type="button" id="sketch-point" data-sketch-tool="point">점</button>
+      <button type="button" id="sketch-line" data-sketch-tool="line" title="선 (L)" aria-keyshortcuts="L">선</button>
+      <button type="button" id="sketch-rectangle" data-sketch-tool="rectangle" title="사각형 (R)" aria-keyshortcuts="R">사각형</button>
+      <button type="button" id="sketch-circle" data-sketch-tool="circle" title="원 (C)" aria-keyshortcuts="C">원</button>
+      <button type="button" id="sketch-ellipse" data-sketch-tool="ellipse">타원</button>
+      <button type="button" id="sketch-arc" data-sketch-tool="arc">3점 호</button>
+      <button type="button" id="sketch-tangent-arc" data-sketch-tool="tangent-arc">접선 호</button>
+    </div>
+    <div class="tool-group" aria-label="변경 이력">
+      <span class="ribbon-label">작업 이력</span>
+      <button type="button" id="undo" title="실행 취소 (Ctrl+Z)">실행 취소</button>
+      <button type="button" id="redo" title="다시 실행 (Ctrl+Y 또는 Ctrl+Shift+Z)">다시 실행</button>
+    </div>
+  </div>
+
+  <p class="message" id="cad-message" role="alert" hidden></p>
+
+  <main class="workbench">
+    <aside class="pane model-pane" aria-labelledby="model-heading">
+      <div class="pane-heading">
+        <h1 id="model-heading">모델</h1><input id="project-name" aria-label="프로젝트 이름" maxlength="80" placeholder="프로젝트 이름">
+      </div>
+      <div class="part-card">
+        <p id="part-state">빈 모델</p>
+        <dl class="model-stats">
+          <div><dt>솔리드</dt><dd id="part-solids">—</dd></div>
+          <div><dt>체적</dt><dd id="part-volume">—</dd></div>
+          <div><dt>X × Y × Z</dt><dd id="part-bounds">—</dd></div>
+        </dl>
+      </div>
+      <div class="pane-section feature-pane">
+        <h2>파트 및 피처</h2>
+        <p class="secondary" id="features-empty">작성한 파트와 스케치가 여기에 표시됩니다.</p>
+        <ol id="feature-list" aria-label="파트별 피처 이력"></ol>
+      </div>
+      <div class="pane-section exports">
+        <h2>유체 체적</h2>
+        <details id="port-extractor" hidden><summary>STEP 내부 공간 추출</summary>
+          <p class="secondary">같은 유로의 개구부를 목록 또는 뷰포트에서 선택하세요.</p>
+          <div id="cap-list"></div><button type="button" id="extract-caps">선택한 공간 추출</button>
+          <p id="cap-warning" role="status"></p>
+        </details>
+        <p class="secondary" id="domain-volume" hidden></p>
+        <button type="button" id="open-flow" aria-describedby="domain-volume" disabled>유동해석 설정</button>
+        <button type="button" id="clear-domain" class="minor" hidden>유체 체적 선택 해제</button>
+      </div>
+      <details class="pane-section exports export-menu">
+        <summary>STEP 내보내기</summary>
+        <button type="button" id="export-part">부품 STEP</button>
+        <button type="button" id="export-domain">유체 체적 STEP</button>
+      </details>
+    </aside>
+
+    <section class="scene" aria-label="CAD 뷰포트">
+      <div class="scene-header">
+        <span class="scene-name"><span class="workspace-mode" id="workspace-mode" data-mode="model">3D 모델링</span><span class="secondary">mm</span></span>
+        <div class="view-actions" aria-label="모델 보기">
+          <button type="button" data-view="iso" title="등각 보기" aria-pressed="true">등각</button>
+          <button type="button" data-view="top" aria-pressed="false" title="3D 모델을 위에서 봅니다.">상면</button>
+          <button type="button" data-view="front" aria-pressed="false">정면</button>
+          <button type="button" data-view="right" aria-pressed="false">우측면</button>
+          <button type="button" id="view-plan" title="현재 스케치 평면을 정면으로 보기 (V)" aria-keyshortcuts="V" aria-pressed="false">평면 보기</button>
+          <button type="button" id="view-fit">맞춤</button>
+          <button type="button" id="inspect-section" aria-pressed="false" aria-controls="section-controls">단면 검사</button>
+          <button type="button" id="snap-toggle" aria-pressed="true" title="스케치를 격자 교점과 원점에 맞춥니다.">스냅</button>
+        </div>
+      </div>
+      <div class="viewport" id="viewport" data-mode="model">
+        <canvas id="cad-canvas" aria-label="3D 부품과 유체 체적. 가운데 버튼으로 회전합니다." tabindex="0"></canvas>
+        <div id="section-controls" class="review-tools" hidden>
+          <label>절단축 <select id="cut-axis"><option>X</option><option>Y</option><option selected>Z</option></select></label>
+          <input type="range" aria-label="CAD 단면 위치" id="cut-fraction" min="0" max="1000" value="500">
+          <output id="cut-location"></output>
+        </div>
+        <span class="axis-label" id="axis-x" hidden>X</span>
+        <span class="axis-label" id="axis-y" hidden>Y</span>
+        <span class="axis-label" id="axis-z" hidden>Z</span>
+        <div class="reference-plane-picker" id="reference-plane-picker" role="group" aria-label="스케치 기준면">
+          <svg class="reference-plane-facets" viewBox="0 0 72 72" aria-hidden="true">
+            <polygon class="reference-plane-facet" data-plane-facet="xy" hidden></polygon>
+            <polygon class="reference-plane-facet" data-plane-facet="yz" hidden></polygon>
+            <polygon class="reference-plane-facet" data-plane-facet="xz" hidden></polygon>
+          </svg>
+          <div class="reference-plane-options">
+            <button type="button" data-sketch-plane="xy" aria-label="XY 기준면" aria-pressed="false" disabled>XY</button>
+            <button type="button" data-sketch-plane="yz" aria-label="YZ 기준면" aria-pressed="false" disabled>YZ</button>
+            <button type="button" data-sketch-plane="xz" aria-label="XZ 기준면" aria-pressed="false" disabled>XZ</button>
+          </div>
+        </div>
+        <span class="origin-label" id="world-origin" hidden>(0, 0, 0)</span>
+        <span class="snap-marker" id="snap-marker" aria-hidden="true" hidden></span>
+        <span class="sketch-cursor-values" id="sketch-cursor-values" aria-hidden="true" hidden></span>
+        <span class="depth-dimension" id="depth-dimension" aria-hidden="true" hidden></span>
+        <button type="button" id="depth-handle" class="depth-handle" aria-label="돌출 높이 드래그" title="Z 방향으로 드래그해 높이 또는 깊이를 조절합니다." hidden>↕</button>
+        <form id="dimension-editor" class="dimension-editor" aria-labelledby="dimension-title" autocomplete="off" hidden>
+          <h2 id="dimension-title">치수 편집</h2>
+          <div id="dimension-fields" class="dimension-fields"></div>
+          <div class="dimension-actions">
+            <button type="button" id="dimension-cancel">취소</button>
+            <button type="submit" id="dimension-apply" class="primary">적용</button>
+          </div>
+        </form>
+        <div class="empty-state" id="empty-state">
+          <p>첫 스케치를 그리세요</p>
+          <span>왼쪽 아래 삼축에서 기준면을 선택한 뒤 도형을 그립니다.</span>
+        </div>
+        <p class="scene-note" id="scene-note">가운데 버튼 회전 · Shift + 가운데 버튼 이동 · 휠 확대</p>
+        <div class="view-overlays">
+          <div class="view-overlay-actions">
+            <label class="layer-picker" id="layer-picker" hidden>표시
+              <select id="view-layer" aria-label="표시할 형상">
+                <option value="both">부품과 유체</option>
+                <option value="part">부품</option>
+                <option value="domain">유체 체적</option>
+              </select>
+            </label>
+            <button type="button" id="view-origin" class="view-origin" title="원점을 뷰포트 가운데로 이동">원점 찾기</button>
+          </div>
+        </div>
+      </div>
+      <div class="scene-footer"><span id="face-info">선택된 면 없음</span><span id="scene-job" role="status" hidden>형상 계산 중…</span></div>
+    </section>
+
+    <aside class="pane inspector" aria-labelledby="sketch-inspector-heading">
+      <div class="pane-heading"><h2 id="sketch-inspector-heading">스케치와 직접 편집</h2><span class="secondary">mm</span></div>
+      <div class="pane-section sketch-inspector">
+        <p id="sketch-plane-info" class="sketch-plane-info" hidden></p>
+        <p id="sketch-region-info" class="secondary" hidden></p>
+        <p id="sketch-open-info" class="secondary sketch-open-info" hidden></p>
+        <p id="sketch-instructions" class="secondary">삼축에서 기준면을 고르거나 솔리드의 평면을 선택해 스케치를 시작하세요.</p>
+        <div id="sketch-edit-tools" class="sketch-edit-tools" role="group" aria-label="스케치 곡선 편집" hidden>
+          <button type="button" data-sketch-tool="trim" title="교차점 사이의 선택한 구간 삭제 (T)" aria-keyshortcuts="T">트림</button>
+          <button type="button" data-sketch-tool="split">분할</button>
+          <button type="button" data-sketch-tool="round">코너 라운드</button>
+          <button type="button" data-sketch-tool="offset">유로 오프셋</button>
+          <button type="button" data-sketch-tool="construction">보조선 전환</button>
+          <button type="button" data-sketch-tool="project">모서리 투영</button>
+        </div>
+        <div class="sketch-profiles" id="sketch-profiles" hidden>
+          <p id="sketch-profile-heading" class="sketch-plane-info">닫힌 스케치</p>
+          <ol id="sketch-profile-list" aria-labelledby="sketch-profile-heading"></ol>
+        </div>
+        <div id="sketch-channels" class="sketch-channels" hidden>
+          <p class="sketch-plane-info" id="sketch-channel-heading">유로 치수</p>
+          <ul id="sketch-channel-list" aria-labelledby="sketch-channel-heading"></ul>
+        </div>
+        <p id="sketch-merge-info" class="secondary" hidden>합친 외곽선은 3D 작업에 적용됩니다. 2D에서는 각 스케치를 따로 편집할 수 있습니다.</p>
+        <label class="field" id="pull-mode-field" for="pull-mode"><span>영역 끌기 작업</span>
+          <select id="pull-mode" disabled>
+            <option value="auto">자동 (끌기 방향 기준)</option>
+            <option value="join">돌출·결합</option>
+            <option value="cut">절삭</option>
+          </select>
+        </label>
+        <div class="sketch-edit-actions">
+          <button type="button" id="merge-sketch-overlaps" class="minor" title="3D에서 끌어 작업할 영역의 외곽선을 합칩니다." hidden disabled>겹친 윤곽 합치기</button>
+          <button type="button" id="delete-element" class="minor" aria-keyshortcuts="Delete" disabled>선택 삭제</button>
+        </div>
+        <form id="direct-form" autocomplete="off" hidden>
+          <label class="field" for="direct-value"><span id="direct-value-label">치수</span><input id="direct-value" type="number" step="any" required></label>
+          <button type="submit" class="primary">치수 적용</button>
+          <button type="button" class="minor full-width" id="make-direct-domain" hidden>이 절삭으로 유체 체적 만들기</button>
+        </form>
+      </div>
+      <details class="legacy-operations" id="legacy-operations">
+        <summary>치수 피처와 부품 이동</summary>
+        <div class="legacy-toolset" aria-label="치수 피처">
+          <button type="button" id="tool-rectangle">사각형 그리기</button>
+          <button type="button" id="tool-circle">원 그리기</button>
+          <button type="button" id="tool-extrude">돌출</button>
+          <button type="button" id="tool-cut">절삭</button>
+          <button type="button" id="tool-move" title="부품 이동 (M)">이동</button>
+        </div>
+        <h2 class="inspector-detail" id="operation-heading">스케치 및 돌출</h2>
+        <p class="inspector-detail" id="operation-description">XY 평면에서 단면을 정하고 +Z 방향으로 돌출합니다.</p>
+        <form id="operation-form" autocomplete="off">
+        <fieldset id="feature-fields">
+          <input type="hidden" id="feature-type" value="extrude">
+          <div id="profile-fields">
+            <label class="field" for="profile"><span>스케치 형상</span>
+              <select id="profile" name="profile">
+                <option value="rectangle">사각형</option>
+                <option value="circle">원</option>
+              </select>
+            </label>
+            <div class="field-grid">
+              <label class="field" for="field-x"><span>X 위치</span><input type="number" id="field-x" step="any" value="0" required></label>
+              <label class="field" for="field-y"><span>Y 위치</span><input type="number" id="field-y" step="any" value="0" required></label>
+              <label class="field" for="field-width" data-profile="rectangle"><span>X 길이</span><input type="number" id="field-width" step="any" min="0.000001" value="40" required></label>
+              <label class="field" for="field-length" data-profile="rectangle"><span>Y 길이</span><input type="number" id="field-length" step="any" min="0.000001" value="24" required></label>
+              <label class="field" for="field-radius" data-profile="circle" hidden><span>반지름</span><input type="number" id="field-radius" step="any" min="0.000001" value="8" required></label>
+              <label class="field" for="field-z"><span>스케치 Z</span><input type="number" id="field-z" step="any" value="0" required></label>
+              <label class="field" for="field-height"><span id="height-label">돌출 높이</span><input type="number" id="field-height" step="any" min="0.000001" value="6" required></label>
+            </div>
+            <div class="support-actions">
+              <button type="button" id="draw-profile" class="minor" aria-pressed="false">화면에서 그리기</button>
+              <button type="button" id="use-face" class="minor">선택면 Z 사용</button>
+              <button type="button" id="drag-depth" class="minor" aria-pressed="false">높이 드래그</button>
+            </div>
+          </div>
+          <div class="field-grid" id="move-fields" hidden>
+            <label class="field" for="field-dx"><span>ΔX</span><input type="number" id="field-dx" step="any" value="0" required></label>
+            <label class="field" for="field-dy"><span>ΔY</span><input type="number" id="field-dy" step="any" value="0" required></label>
+            <label class="field" for="field-dz"><span>ΔZ</span><input type="number" id="field-dz" step="any" value="0" required></label>
+          </div>
+          <p class="import-detail" id="import-detail" hidden></p>
+          <button type="submit" id="feature-apply" class="primary">돌출 만들기</button>
+          <button type="button" id="make-domain" class="minor full-width" hidden>이 절삭으로 유체 체적 만들기</button>
+          <button type="button" id="cancel-edit" class="minor full-width" hidden>편집 종료</button>
+        </fieldset>
+        </form>
+      </details>
+    </aside>
+  </main>
+</body>
+</html>

@@ -1,0 +1,23 @@
+FlowForm 0.1.0 Windows x64 설치 안내
+
+1. 시작 메뉴에서 FlowForm을 실행합니다. 이 설치판에는 앱이 사용하는 Python, CAD 형상 엔진과 Gmsh가 포함됩니다.
+2. CFD 계산을 하려면 시작 메뉴의 FlowForm - OpenFOAM setup을 실행합니다.
+   도우미는 Ubuntu 24.04 WSL에서 공식 OpenFOAM Foundation v14를 다운로드하고 설치합니다.
+   WSL이 꺼진 PC에서는 관리자 터미널에서 wsl --install --no-distribution 을 실행하고,
+   Windows가 재시작을 요청하면 재시작한 뒤 도우미를 다시 실행합니다.
+   Ubuntu 첫 실행에서 사용자 설정이 표시되면 완료한 뒤 도우미를 다시 실행합니다.
+3. CFD 탭 하단의 실행 환경에서 OpenFOAM v14가 준비되었는지 확인합니다.
+   NVIDIA CUDA 압력 가속은 GPU 드라이버와 해당 Ubuntu 사용자용 cuDSS 모듈을 따로 설치한 환경에서 사용합니다.
+   모듈 소스와 빌드 스크립트는 설치 폴더 app\gpu_pressure에 있습니다.
+4. 앱 위쪽의 업데이트 확인은 배포 채널 등록 후 사용할 수 있습니다.
+   승인하면 새 설치 파일을 내려받고 서명과 SHA-256을 확인합니다. 진행 중인 해석이 없으면 설치하고 앱을 다시 엽니다.
+5. 결과와 CAD 자동 저장은 %LOCALAPPDATA%\FlowFormInstalled 에 저장됩니다.
+   설치판 데이터는 개발용 앱 및 Chrome 데이터와 별개입니다. 기존 CAD는 프로젝트 JSON으로 가져올 수 있습니다.
+
+지원 대상은 Windows 10 (빌드 19041 이상) 및 Windows 11의 x64 PC입니다.
+WebView2가 없으면 설치 프로그램이 Microsoft의 공식 부트스트래퍼를 실행합니다.
+WSL과 OpenFOAM의 최초 설치, WebView2 다운로드 및 서버 업데이트에는 인터넷이 필요합니다.
+
+포함된 구성요소의 라이선스는 runtime 폴더와 runtime\Lib\site-packages의 dist-info에 있습니다.
+Gmsh 4.15.2 소스는 https://gmsh.info/src/gmsh-4.15.2-source.tgz 에서 확인할 수 있습니다.
+

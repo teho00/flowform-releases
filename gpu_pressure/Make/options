@@ -1,0 +1,2 @@
+EXE_INC = -I$(FLOWFORM_CUDA)/include
+LIB_LIBS = -lOpenFOAM -L$(FLOWFORM_CUDA)/lib -Wl,--disable-new-dtags,-rpath,$(FLOWFORM_CUDA)/lib -l:libcudss.so.0 -l:libcudart.so.12
