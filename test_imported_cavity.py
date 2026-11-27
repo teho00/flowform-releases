@@ -3,6 +3,19 @@ import cad_model as cad
 
 @unittest.skipUnless(cad.KERNEL_READY, "Open CASCADE required")
 class ImportedCavityTest(unittest.TestCase):
+    def test_native_through_cut_exposes_ports_without_step_round_trip(self):
+        block = {"type": "extrude", "profile": "rectangle", "x": 0, "y": 0, "z": 0,
+                 "width": 10, "length": 10, "height": 10}
+        cut = {"type": "cut", "profile": "circle", "x": 5, "y": 5, "z": 10, "radius": 1, "height": 10}
+        doc = {"version": 1, "operations": [block]}
+        self.assertFalse(cad.model(doc)["openings"])
+        doc["operations"].append(cut)
+        ports = [cap["ref"] for cap in cad.model(doc)["openings"]]
+        self.assertEqual(len(ports), 2)
+        result = cad.flow_domain({**doc, "domainPorts": ports})
+        self.assertAlmostEqual(result["domain"]["volume"], 10 * math.pi, places=5)
+        self.assertTrue(set(ports).issubset({face["ref"] for face in result["domain"]["faces"]}))
+
     def test_straight_and_branched_imports(self):
         block = cad.BRepPrimAPI_MakeBox(10, 10, 10).Shape()
         def prism(origin, direction, length):

@@ -44,7 +44,19 @@ const cross = (a, b) => [
 const sketchNormal = (plane) => cross(plane.x, plane.y);
 const worldPoint = (plane, [u, v]) => plane.origin.map((value, axis) => value + u * plane.x[axis] + v * plane.y[axis]);
 const XY = {origin: [0, 0, 0], x: [1, 0, 0], y: [0, 1, 0]};
-const METRIC = new Intl.NumberFormat('ko-KR', {maximumFractionDigits: 3});
+const DISPLAY = new Intl.NumberFormat('ko-KR', {maximumSignificantDigits: 3});
+const COUNTS = new Intl.NumberFormat('ko-KR', {maximumFractionDigits: 0});
+
+export function formatDisplayNumber(value) {
+  if (!Number.isFinite(value)) return '—';
+  if (value === 0) return '0';
+  if (Math.abs(value) >= 0.001) return DISPLAY.format(value);
+  const [mantissa, exponent] = value.toExponential(2).split('e');
+  const power = Number(exponent);
+  return `${Number(mantissa)}e${power < 0 ? '-' : '+'}${String(Math.abs(power)).padStart(2, '0')}`;
+}
+
+export const formatCount = value => Number.isFinite(value) ? COUNTS.format(value) : '—';
 function roundMm(value) {
   const rounded = Math.round(value * 1000) / 1000;
   return rounded === 0 ? 0 : rounded;
@@ -140,7 +152,7 @@ function drawable(entity) {
 
 function sketchDimensions(entity) {
   const {kind, x, y, x1, y1, x2, y2, width, length, radius, rx, ry} = entity;
-  const mm = (value) => METRIC.format(value);
+  const mm = formatDisplayNumber;
   if (kind === 'point') return 'X ' + mm(x) + ' · Y ' + mm(y) + ' mm';
   if (kind === 'line') return `길이 ${mm(Math.hypot(x2 - x1, y2 - y1))} mm · ${mm(Math.atan2(y2 - y1, x2 - x1) / RAD)}°`;
   if (kind === 'rectangle') return mm(width) + ' × ' + mm(length) + ' mm';
@@ -1227,7 +1239,7 @@ export function createViewport(canvas, {
       onDepthChange?.(height);
       schedule();
     }
-    showCursorValues(event, (depthTool.type === 'cut' ? '깊이 ' : '높이 ') + METRIC.format(height) + ' mm');
+          showCursorValues(event, (depthTool.type === 'cut' ? '깊이 ' : '높이 ') + formatDisplayNumber(height) + ' mm');
     return Math.abs(motion) >= DEPTH_DRAG_THRESHOLD && height !== initialHeight;
   }
 
@@ -1902,7 +1914,7 @@ export function createViewport(canvas, {
       if (bypass) setSnapTarget(null);
       drag.offset = snapped.map((value, axis) => value - drag.anchor[axis]);
       if (drag.translate) drag.entity = translatedSketch(drag.hit.entity, drag.offset);
-      const [dx, dy] = drag.offset.map((value) => `${value > 0 ? '+' : ''}${METRIC.format(value)}`);
+        const [dx, dy] = drag.offset.map((value) => `${value > 0 ? '+' : ''}${formatDisplayNumber(value)}`);
       showCursorValues(event, `이동 ΔX ${dx} · ΔY ${dy} mm`);
     } else if (drag.kind === 'work-edit' && drag.start) {
       const point = localPoint(event, drag.entry, drag.hit.entity.id, !drag.channel);
@@ -1919,7 +1931,7 @@ export function createViewport(canvas, {
         {type: 'pull', sketch: drag.entry.id, region: drag.region.id, distance: drag.value, body: drag.body, mode: drag.mode} : null);
       const label = drag.mode === 'cut' || (drag.mode === 'auto' && drag.value < 0 && shapes.part) ? '절삭 '
         : drag.mode === 'join' ? '결합 ' : '돌출 ';
-      showCursorValues(event, (snapped === null ? '' : '면 스냅 · ') + label + METRIC.format(Math.abs(drag.value)) + ' mm');
+        showCursorValues(event, (snapped === null ? '' : '면 스냅 · ') + label + formatDisplayNumber(Math.abs(drag.value)) + ' mm');
     } else if (drag.kind === 'work-face') {
       const {face, normalDirection, anchor} = drag;
       const direction = dragDirection(drag, normalDirection, anchor, motion);
@@ -1928,9 +1940,9 @@ export function createViewport(canvas, {
         const {radius: previous, sense = 1} = face.surface;
         const next = roundMm(clamp(previous + distance * sense, 0.001, 1_000_000));
         distance = roundMm((next - previous) * sense);
-        showCursorValues(event, '반지름 R ' + METRIC.format(next) + ' mm');
+          showCursorValues(event, '반지름 R ' + formatDisplayNumber(next) + ' mm');
       } else {
-        showCursorValues(event, '면 이동 ' + (distance > 0 ? '+' : '') + METRIC.format(distance) + ' mm');
+          showCursorValues(event, '면 이동 ' + (distance > 0 ? '+' : '') + formatDisplayNumber(distance) + ' mm');
       }
       drag.value = distance;
       previewOperation(Math.hypot(...motion) >= DEPTH_DRAG_THRESHOLD && distance ?
@@ -1944,7 +1956,7 @@ export function createViewport(canvas, {
       previewOperation(Math.hypot(...motion) >= DEPTH_DRAG_THRESHOLD && drag.value !== start &&
         (drag.value > 0 || index !== undefined) ?
         {type: 'fillet', body: edge.body_id, edge: edge.ref, radius: drag.value, index} : null);
-      showCursorValues(event, '필렛 R ' + METRIC.format(drag.value) + ' mm');
+        showCursorValues(event, '필렛 R ' + formatDisplayNumber(drag.value) + ' mm');
     }
     schedule();
   }
@@ -2135,7 +2147,7 @@ export function createViewport(canvas, {
     const nextGesture = gestureHit(event, face);
     if (hovered !== id || gestureHover || nextGesture) {
       if (nextGesture?.channel || gestureHover?.channel) {
-        const hint = nextGesture?.channel && '유로 폭 ' + METRIC.format(nextGesture.channel.width) + ' mm · 두 번 클릭해 편집';
+      const hint = nextGesture?.channel && '유로 폭 ' + formatDisplayNumber(nextGesture.channel.width) + ' mm · 두 번 클릭해 편집';
         showCursorValues(event, hint);
       } else if (!inspectMesh && !portCaps.length) {
         const labels = {'work-face':'파트 면 · 크기 변경','work-fillet':'솔리드 모서리 · 필렛','work-move':'스케치 영역 · 이동','work-edit':'스케치 모서리 · 치수 변경','work-pull':'스케치 영역 · 돌출 또는 절삭'};

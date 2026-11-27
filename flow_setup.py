@@ -190,22 +190,27 @@ def parse_conditions(body):
             setup["live"] = True
         end = number(body, "end_time_s", "해석 종료 시간 (s)", minimum=1e-9)
         count = body.get("step_count")
+        step_mode = body.get("time_step_mode", "fixed" if count is not None else "adaptive")
+        if step_mode not in ("adaptive", "fixed") or (step_mode == "fixed" and count is None):
+            raise ValueError("시간 간격 방식과 스텝 수를 확인하세요.")
         if count is not None:
             if type(count) is not int or not 1 <= count <= 100_000:
                 raise ValueError("시간 스텝 수는 1~100,000 사이의 정수로 입력하세요.")
             step = end / count
             if step < 1e-9:
                 raise ValueError("계산 시간 간격은 1 ns 이상이어야 합니다.")
-            setup["step_count"] = count
+            setup["step_count" if step_mode == "fixed" else "requested_step_count"] = count
         else:
             step = number(body, "time_step_s", "시간 간격 (s)", minimum=1e-9, maximum=end)
         if count is None and end / step > 100_000:
             raise ValueError("비정상 해석은 최대 100,000 시간 단계까지 설정할 수 있습니다.")
+        setup["time_step_mode"] = step_mode
+        fixed_steps = step_mode == "fixed"
         if body.get("save_interval_s") is not None:
             interval = number(body,"save_interval_s","결과 저장 간격 (s)",minimum=1e-9,maximum=end)
             if end/interval > 200:
                 raise ValueError("결과 저장 간격을 늘려 200개 이하의 시점으로 지정하세요.")
-            if count is not None and not math.isclose(interval / step, round(interval / step), abs_tol=1e-7):
+            if fixed_steps and not math.isclose(interval / step, round(interval / step), abs_tol=1e-7):
                 raise ValueError("저장 간격을 계산 시간 간격의 정수배로 입력하세요.")
             setup["save_interval_s"] = interval
         schedule = body.get("flow_schedule", [])
@@ -217,7 +222,7 @@ def parse_conditions(body):
             t = number(entry,"time_s","변경 시각",minimum=0,maximum=end)
             number(entry,"ml_min","입구 유량",minimum=0)
             if t <= last or t >= end: raise ValueError("변경 시각을 종료 시간보다 작게, 증가하는 순서로 입력하세요.")
-            if count is not None and not math.isclose(t / step, round(t / step), abs_tol=1e-7):
+            if fixed_steps and not math.isclose(t / step, round(t / step), abs_tol=1e-7):
                 raise ValueError("유량 변경 시각을 계산 시간 간격의 정수배로 입력하세요.")
             last = t
         if schedule: setup["flow_schedule"] = schedule
@@ -257,5 +262,9 @@ def parse(body):
 def apply_conditions(saved, changes):
     if not isinstance(changes, dict):
         raise ValueError("해석 조건을 JSON 객체로 보내세요.")
-    setup = parse_conditions({**saved, **changes})
-    return {**{k: v for k, v in saved.items() if k not in ("live", "flow_schedule", "save_interval_s", "refinement_group", "step_count")}, **setup, "mesh_only": False}
+    conditions = {**saved, **changes}
+    if "step_count" not in changes and "time_step_s" not in changes and "requested_step_count" in saved:
+        conditions["step_count"] = saved["requested_step_count"]
+    setup = parse_conditions(conditions)
+    transient_keys = ("live", "flow_schedule", "save_interval_s", "step_count", "requested_step_count", "time_step_mode")
+    return {**{k: v for k, v in saved.items() if k not in (*transient_keys, "refinement_group")}, **setup, "mesh_only": False}

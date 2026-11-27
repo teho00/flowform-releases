@@ -49,6 +49,39 @@ def ensure_server(url, port, runs_dir):
     raise RuntimeError(f"로컬 해석 서비스를 시작할 수 없습니다.\n{log_path}")
 
 
+def style_update_menu(native_window):
+    from System.Drawing import Color, SolidBrush
+    from System.Windows.Forms import MenuStrip, ToolStripProfessionalRenderer
+
+    menu = next((control for control in native_window.Controls if isinstance(control, MenuStrip)), None)
+    if menu is None:
+        return
+    background = Color.FromArgb(13, 24, 40)
+    hover = Color.FromArgb(31, 55, 77)
+    foreground = Color.FromArgb(222, 240, 248)
+    renderer = ToolStripProfessionalRenderer()
+    renderer.RoundedEdges = False
+
+    def paint_bar(_, event):
+        event.Graphics.Clear(background)
+
+    def paint_item(_, event):
+        color = hover if event.Item.Selected or event.Item.Pressed else background
+        brush = SolidBrush(color)
+        try:
+            event.Graphics.FillRectangle(brush, 0, 0, event.Item.Width, event.Item.Height)
+        finally:
+            brush.Dispose()
+
+    renderer.RenderToolStripBackground += paint_bar
+    renderer.RenderMenuItemBackground += paint_item
+    menu.BackColor = background
+    menu.ForeColor = foreground
+    for item in menu.Items:
+        item.ForeColor = foreground
+    menu.Renderer = renderer
+
+
 def main():
     import webview
 
@@ -81,12 +114,14 @@ def main():
         width=1440, height=900, min_size=(800, 560), maximized=True,
         background_color="#080d18", text_select=True, zoomable=True,
     )
-    def set_window_icon():
+    def configure_native_window():
         from System.Drawing import Icon
 
         window.native.Icon = Icon(str(ROOT / "channel_ui" / "flowform.ico"))
+        if release_config.is_file():
+            style_update_menu(window.native)
 
-    window.events.before_show += set_window_icon
+    window.events.before_show += configure_native_window
     # Use a separate persistent profile for project autosave and workspace preferences.
     menu = None
     if release_config.is_file():

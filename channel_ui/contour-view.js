@@ -1,4 +1,4 @@
-import {createViewport} from '/cad-view.js';
+import {createViewport, formatCount, formatDisplayNumber as format} from '/cad-view.js';
 
 const colors = [
   [31, 41, 98], [33, 90, 170], [18, 153, 172],
@@ -6,7 +6,6 @@ const colors = [
 ];
 const colorBins = 64;
 const viewForAxis = {x: 'right', y: 'front', z: 'top', '': 'iso'};
-const format = new Intl.NumberFormat('ko-KR', {maximumSignificantDigits: 5});
 const byId = (id) => document.getElementById(id);
 
 function colorAt(fraction) {
@@ -80,8 +79,8 @@ export function createContourPanel(request, wireframeForRun) {
       const lo=Math.min(...values), hi=Math.max(...values);
       const y=v=>base-32*(v-lo)/(hi-lo||1);
       svg('text',{x:4,y:base-16,fill:color},label);
-      svg('text',{x:104,y:base-31,'text-anchor':'end'},format.format(hi));
-      if(hi!==lo) svg('text',{x:104,y:base,'text-anchor':'end'},format.format(lo));
+      svg('text',{x:104,y:base-31,'text-anchor':'end'},format(hi));
+      if(hi!==lo) svg('text',{x:104,y:base,'text-anchor':'end'},format(lo));
       svg('path',{d:'M112 '+base+' H652',stroke:'#53616a',fill:'none'});
       let path=key==='ml_min' ? 'M112 '+y(values[0]) : '';
       frames.forEach((f,i)=>{
@@ -90,7 +89,7 @@ export function createContourPanel(request, wireframeForRun) {
       });
       svg('path',{d:path,fill:'none',stroke:color,'stroke-width':2});
     }
-    svg('text',{x:112,y:149},'0 s'); svg('text',{x:652,y:149,'text-anchor':'end'},end+' s');
+    svg('text',{x:112,y:149},'0 s'); svg('text',{x:652,y:149,'text-anchor':'end'},format(end)+' s');
     svg('line',{id:'response-cursor',x1:652,x2:652,y1:12,y2:125,stroke:'#fff','stroke-dasharray':'3 3'});
   }
   graph.onclick = event => {
@@ -110,8 +109,8 @@ export function createContourPanel(request, wireframeForRun) {
       slider.value = slider.max;
       const changes = frames.flatMap((item, i) => i && Math.abs(item.ml_min - frames[i-1].ml_min) > 1e-8 ? [i] : []);
       byId('frame-marks').replaceChildren(...changes.map(i => new Option('', String(i))));
-      byId('rate-transitions').textContent = changes.map(i => frames[i-1].time + ' s부터 ' +
-        format.format(frames[i].ml_min) + ' mL/min').join(' · ');
+      byId('rate-transitions').textContent = changes.map(i => format(Number(frames[i-1].time)) + ' s부터 ' +
+        format(frames[i].ml_min) + ' mL/min').join(' · ');
       byId('playback').hidden = false;
       draw(false);
     } catch (error) {
@@ -141,7 +140,7 @@ export function createContourPanel(request, wireframeForRun) {
     if (!axis.value || !bounds) return;
     const index = 'xyz'.indexOf(axis.value);
     const offset = bounds[index] + selectedFraction() * (bounds[index + 3] - bounds[index]);
-    const label = axis.value.toUpperCase() + ' = ' + format.format(Math.abs(offset) < 1e-10 ? 0 : offset) + ' mm';
+    const label = axis.value.toUpperCase() + ' = ' + format(Math.abs(offset) < 1e-10 ? 0 : offset) + ' mm';
     byId('contour-position-value').textContent = label;
     position.setAttribute('aria-valuetext', label);
   }
@@ -156,7 +155,7 @@ export function createContourPanel(request, wireframeForRun) {
     const parameters = new URLSearchParams({field: field.value});
     if (frames.length) {
       parameters.set('time', frames[+slider.value].time);
-      slider.setAttribute('aria-valuetext', frames[+slider.value].time + ' s');
+      slider.setAttribute('aria-valuetext', format(Number(frames[+slider.value].time)) + ' s');
     }
     if (currentAxis) {
       parameters.set('axis', currentAxis);
@@ -188,17 +187,17 @@ export function createContourPanel(request, wireframeForRun) {
       const title = field.selectedOptions[0].textContent;
       const placement = currentAxis ? byId('contour-position-value').textContent : '유체 체적 표면';
       canvas.setAttribute('aria-label', title + ' 컨투어 · ' + placement);
-      byId('frame-time').textContent = transient ? '해석 시간 ' + data.time_directory + ' s' +
-        (data.frame_ml_min == null ? '' : ' · 입구 ' + format.format(data.frame_ml_min) + ' mL/min') : '';
+      byId('frame-time').textContent = transient ? '해석 시간 ' + format(Number(data.time_directory)) + ' s' +
+        (data.frame_ml_min == null ? '' : ' · 입구 ' + format(data.frame_ml_min) + ' mL/min') : '';
       legend.hidden = !model.domain;
       byId('contour-legend-label').textContent = title;
-      byId('contour-min').textContent = format.format(data.minimum) + ' ' + data.unit;
-      byId('contour-max').textContent = format.format(data.maximum) + ' ' + data.unit;
+      byId('contour-min').textContent = format(data.minimum) + ' ' + data.unit;
+      byId('contour-max').textContent = format(data.maximum) + ' ' + data.unit;
       colorsBar.style.background = data.minimum === data.maximum
         ? 'rgba(' + colorAt(0.5).slice(0, 3).map(component => Math.round(component * 255)).join(', ') + ', 1)'
         : gradient;
       const description = model.domain
-        ? (currentAxis ? '단면의 셀 중심값' : '표면의 경계면 값') + ' · ' + format.format(data.count) + '개'
+        ? (currentAxis ? '단면의 셀 중심값' : '표면의 경계면 값') + ' · ' + formatCount(data.count) + '개'
         : '선택한 위치를 지나는 격자 셀이 없습니다.';
       status.textContent = description + (wireframe ? ' · 전체 외곽 와이어프레임' : '') +
         (data.truncated || wireframe?.truncated ? ' · 화면에 일부 요소 표시' : '');

@@ -117,7 +117,13 @@
                   <label class="field">End Time (종료 시간) · s
                     <input type="number" id="end-time" min="0.000000001" step="any" value="0.1" required disabled>
                   </label>
-                  <label class="field">Time Steps (시간 스텝 수)
+                  <label class="field">Time Stepping (시간 간격 방식)
+                    <select id="time-step-mode" disabled>
+                      <option value="adaptive">Adaptive (자동 · 목표 Co 0.5)</option>
+                      <option value="fixed">Fixed (고정 스텝 수)</option>
+                    </select>
+                  </label>
+                  <label class="field"><span id="time-step-label">Base Steps (기준 스텝 수)</span>
                     <input type="number" id="time-step" min="1" max="100000" step="1" value="100" required disabled>
                   </label>
                   <p id="time-step-preview" class="subtle"></p>
@@ -265,6 +271,7 @@
           <div class="section-head">
             <h2 id="progress-title">Run Status (실행 상태)</h2>
             <div class="run-toolbar">
+              <button id="finish-run" class="primary" type="button" hidden>여기까지 계산하고 결과 보기</button>
               <button id="stop-run" class="stop-button" type="button" hidden>해석 중단</button>
               <span id="run-status" class="badge" role="status">대기</span>
             </div>
@@ -281,20 +288,13 @@
             <li data-stage="foamRun"><span>솔버 실행</span><small>대기</small></li>
             <li data-stage="postprocess"><span>후처리</span><small>대기</small></li>
           </ol>
+          <dl id="run-timing" class="metrics run-timing" hidden>
+            <div><dt>Elapsed Time (경과 시간)</dt><dd id="run-elapsed">—</dd></div>
+            <div id="run-remaining-card"><dt>Estimated Time Left (예상 남은 시간)</dt><dd id="run-remaining">—</dd></div>
+            <div id="run-finish-card"><dt id="run-finish-label">예상 완료 시각</dt><dd id="run-finish">—</dd></div>
+          </dl>
+          <p id="run-timing-note" class="subtle" hidden></p>
           <button id="open-run-output" class="secondary-button" type="button" hidden>결과 보기</button>
-          <div id="run-residuals">
-            <section id="solver-monitor" class="chart-section" aria-labelledby="residual-heading" hidden>
-              <h3 id="residual-heading">Solver Residuals (솔버 잔차 그래프)</h3>
-              <p id="solver-step" class="subtle" role="status" hidden></p>
-              <p id="residual-status" class="subtle" role="status"></p>
-              <div id="residual-chart"></div>
-            </section>
-          </div>
-          <form id="live-inlet" hidden>
-            <label>입구 유량 (mL/min) <input id="live-rate" type="number" min="0" step="any" required></label>
-            <button type="submit">다음 구간에 적용</button>
-            <p id="live-message" role="status"></p>
-          </form>
           <section class="notice error run-failure" id="run-error" aria-labelledby="run-error-title" hidden>
             <div role="alert">
               <h3 id="run-error-title"></h3>
@@ -305,6 +305,21 @@
             </div>
             <button type="button" class="secondary-button" id="run-error-log" hidden>원문 로그 보기</button>
           </section>
+          <div id="run-residuals">
+            <section id="solver-monitor" class="chart-section" aria-labelledby="residual-heading" hidden>
+              <h3 id="residual-heading">Solver Residuals (솔버 잔차 그래프)</h3>
+              <p id="solver-step" class="subtle" role="status" hidden></p>
+              <p id="solver-diagnostics" class="subtle" hidden></p>
+              <p id="solver-diagnostic-warning" class="subtle solver-diagnostic-warning" role="status" hidden></p>
+              <p id="residual-status" class="subtle" role="status"></p>
+              <div id="residual-chart"></div>
+            </section>
+          </div>
+          <form id="live-inlet" hidden>
+            <label>입구 유량 (mL/min) <input id="live-rate" type="number" min="0" step="any" required></label>
+            <button type="submit">다음 구간에 적용</button>
+            <p id="live-message" role="status"></p>
+          </form>
           <details class="log-panel" id="log-panel" hidden>
             <summary>실행 로그</summary>
             <label for="log-select" class="log-picker">파일 <select id="log-select"></select></label>
@@ -320,6 +335,7 @@
           <p id="results-empty" class="subtle">유동해석이 완료되면 입구와 출구의 평균 압력 및 셀별 속도를 표시합니다.</p>
           <div id="results-data" hidden>
             <p id="sample-result-note" class="notice" hidden></p>
+            <p id="early-result-note" class="notice" hidden></p>
             <p class="subtle" id="convergence-note" hidden></p>
             <section id="result-readouts" class="result-readouts" aria-label="해석 결과 요약" hidden>
               <dl class="metrics result-pressure" id="pressure-data"></dl>
@@ -420,7 +436,13 @@
     </section>
   </main>
   <dialog id="mesh-solve-dialog" class="card panel mesh-solve-dialog" aria-labelledby="mesh-solve-title">
-    <div class="section-head"><h2 id="mesh-solve-title">선택한 격자 해석</h2></div>
+    <div class="section-head mesh-dialog-header">
+      <h2 id="mesh-solve-title">선택한 격자 해석</h2>
+      <div class="mesh-dialog-actions">
+        <button type="button" class="secondary-button" id="mesh-solve-cancel">닫기</button>
+        <button class="primary" type="submit" form="mesh-solve-form" id="mesh-solve-submit">해석 실행</button>
+      </div>
+    </div>
     <p id="mesh-solve-source" class="subtle"></p>
     <p id="mesh-solve-error" class="notice error" role="alert" hidden></p>
     <form id="mesh-solve-form">
@@ -489,7 +511,13 @@
           <label class="field">End Time (종료 시간) · s
             <input type="number" id="saved-end-time" min="0.000000001" step="any" required disabled>
           </label>
-          <label class="field">Time Steps (시간 스텝 수)
+          <label class="field">Time Stepping (시간 간격 방식)
+            <select id="saved-time-step-mode" disabled>
+              <option value="adaptive">Adaptive (자동 · 목표 Co 0.5)</option>
+              <option value="fixed">Fixed (고정 스텝 수)</option>
+            </select>
+          </label>
+          <label class="field"><span id="saved-time-step-label">Base Steps (기준 스텝 수)</span>
             <input type="number" id="saved-time-step" min="1" max="100000" step="1" required disabled>
           </label>
           <p id="saved-time-step-preview" class="subtle"></p>
@@ -503,10 +531,6 @@
           </div>
         </div>
       </fieldset>
-      <div class="mesh-dialog-actions">
-        <button type="button" class="secondary-button" id="mesh-solve-cancel">닫기</button>
-        <button class="primary" type="submit" id="mesh-solve-submit">해석 실행</button>
-      </div>
     </form>
   </dialog>
 </body>

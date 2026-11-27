@@ -451,28 +451,93 @@ if __name__ == "__main__":
     main()
 
 
-def residual_progress(log):
-    """Report started time steps and the largest initial residual per field in each."""
+def residual_progress(log, transient=False):
+    """Read initial residual peaks and the final linear solve in each time step."""
     if not log.is_file():
         return {"step": 0, "time": None, "residuals": []}
     rows = {}
-    number = r"[-+0-9.eE]+"
+    number = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
     time_pattern = re.compile(rf"^Time\s*=\s*({number})")
-    field_pattern = re.compile(rf"Solving for (Ux|Uy|Uz|p), Initial residual = ({number})")
+    field_pattern = re.compile(
+        r"Solving for (Ux|Uy|Uz|p), Initial residual = ([^,\s]+)"
+        r"(?:,\s*Final residual = ([^,\s]+))?",
+    )
+    courant_pattern = re.compile(rf"^Courant Number[^\n]*\bmax:\s*({number}|[+-]?(?:inf|nan))(?=\s|$)", re.IGNORECASE)
     row = None
+    courant = None
+    previous_time = 0.0
+    diagnostics = []
+    current = None
     with log.open(encoding="utf-8", errors="replace") as lines:
         for line in lines:
+            if transient:
+                co_match = courant_pattern.match(line)
+                if co_match:
+                    try:
+                        courant = float(co_match[1])
+                    except ValueError:
+                        courant = None
+                if line.strip() == "End" and current is not None:
+                    current["complete"] = True
+                    courant = None
             match = time_pattern.match(line)
             if match:
                 time = float(match[1])
                 row = rows.setdefault(time, {"time": time}) if math.isfinite(time) else None
+                if transient and row is not None:
+                    if current is not None:
+                        current["complete"] = True
+                    invalid_co = courant is not None and not math.isfinite(courant)
+                    current = {"time": time, "delta_t": time - previous_time if time > previous_time else None,
+                               "max_courant": None if invalid_co else courant, "final": {},
+                               "nonfinite": invalid_co, "complete": False}
+                    diagnostics.append(current)
+                    previous_time, courant = time, None
             match = field_pattern.search(line)
             if match and row is not None:
-                field, value = match[1], float(match[2])
-                if math.isfinite(value):
-                    row[field] = max(row.get(field, 0), value)
-    return {"step": len(rows), "time": max(rows, default=None),
-            "residuals": [row for _, row in sorted(rows.items()) if len(row) > 1]}
+                field, initial, final = match.groups()
+                try:
+                    initial = float(initial)
+                    final = float(final) if final is not None else None
+                except ValueError:
+                    continue
+                if math.isfinite(initial):
+                    row[field] = max(row.get(field, 0), initial)
+                if current is not None:
+                    current["nonfinite"] |= not math.isfinite(initial) or (final is not None and not math.isfinite(final))
+                    if final is not None and math.isfinite(final):
+                        current["final"][field] = final
+    result = {"step": len(rows), "time": max(rows, default=None),
+              "residuals": [row for _, row in sorted(rows.items()) if len(row) > 1]}
+    if transient:
+        result["step"] = len(diagnostics)
+        result["diagnostics"] = transient_diagnostics(diagnostics)
+    return result
+
+
+def transient_diagnostics(steps):
+    tolerance = 1e-9  # Absolute tolerance configured for pFinal and UFinal.
+    result = {"current": steps[-1] if steps else None, "tolerance": tolerance, "checked_steps": 0,
+              "above_target": 0, "first_above": None, "first_repeated": None, "first_nonfinite": None}
+    consecutive = 0
+    for index, step in enumerate(steps, 1):
+        location = {"step": index, "time": step["time"]}
+        if step["nonfinite"] and result["first_nonfinite"] is None:
+            result["first_nonfinite"] = location
+        final = step["final"]
+        if not step["complete"] or "p" not in final or len(final) < 2:
+            consecutive = 0
+            continue
+        result["checked_steps"] += 1
+        if max(final.values()) <= tolerance:
+            consecutive = 0
+            continue
+        result["above_target"] += 1
+        result["first_above"] = result["first_above"] or location
+        consecutive += 1
+        if consecutive == 2 and result["first_repeated"] is None:
+            result["first_repeated"] = {"step": index - 1, "time": steps[index - 2]["time"]}
+    return result
 
 
 def residual_history(log):

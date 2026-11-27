@@ -1,4 +1,4 @@
-import {createViewport} from '/cad-view.js';
+import {createViewport, formatCount, formatDisplayNumber} from '/cad-view.js';
 import {createContourPanel} from '/contour-view.js';
 
 const byId = (id) => document.getElementById(id);
@@ -19,13 +19,14 @@ const logForStage = {
   prepare: 'log.prepare', mesh: 'log.gmsh', convert: 'log.gmshToFoam',
   checkMesh: 'log.checkMesh', foamRun: 'log.foamRun', postprocess: 'log.postprocess',
 };
-const numberFormat = new Intl.NumberFormat('ko-KR', {maximumSignificantDigits: 6});
 const runPath = '/api/flow/runs';
 const projectKey = 'openfoam-cad-project-v1';
 let chosen = new URL(location.href).searchParams.get('run');
 let shownRun;
 let pollId;
 let pendingMeshPreview;
+let pendingFinishPreview;
+let requestingFinish;
 const inletUnits = {
   speed: {'m/s': 1, 'cm/s': 0.01, 'mm/s': 0.001},
   flow: {'mL/min': 1, 'L/min': 1000, 'mL/s': 60, 'm³/s': 6e7},
@@ -49,9 +50,17 @@ let previewAbort;
 let previewTimer;
 let solveSource;
 const meshSurfaceCache = new Map();
+const orthogonalityFormat = new Intl.NumberFormat('ko-KR', {maximumSignificantDigits: 6});
 
 function format(value, unit = '') {
-  return Number.isFinite(value) ? numberFormat.format(value) + (unit ? ' ' + unit : '') : '—';
+  return Number.isFinite(value) ? formatDisplayNumber(value) + (unit ? ' ' + unit : '') : '—';
+}
+
+function formatOrthogonality(value) {
+  const display = format(value);
+  if (value >= 1 || display !== '1') return display;
+  const precise = orthogonalityFormat.format(value);
+  return precise === '1' ? '< 1' : precise;
 }
 
 function notice(id, message) {
@@ -416,13 +425,112 @@ function showRunFailure(run) {
   button.dataset.log = button.hidden ? '' : failure.log;
 }
 
+const runTimeFormat = new Intl.DateTimeFormat('ko-KR', {dateStyle: 'medium', timeStyle: 'short'});
+const steadyIterationLimit = 2000;
+let runTiming = {samples: []};
+
+function formatDuration(seconds) {
+  let time = Math.max(0, Math.floor(seconds));
+  const parts = [];
+  for (const [size, label] of [[86400, '일'], [3600, '시간'], [60, '분'], [1, '초']]) {
+    const count = Math.floor(time / size);
+    time %= size;
+    if (count) parts.push(formatCount(count) + label);
+  }
+  return parts.slice(0, 2).join(' ') || '0초';
+}
+
+function recordTimingSample(run, update, now) {
+  if (runTiming.flow !== run.applied_ml_min) {
+    runTiming.flow = run.applied_ml_min;
+    runTiming.samples = [];
+  }
+  if (!update || !Number.isFinite(update.time)) return;
+  const transient = run.setup.mode === 'transient';
+  const current = update.diagnostics?.current;
+  const progress = transient && current && !current.complete
+    ? update.time - (current.delta_t ?? 0)
+    : transient ? update.time : update.time - 1;
+  const samples = runTiming.samples;
+  if (samples.length && progress <= samples.at(-1).progress) return;
+  samples.push({at: now, progress});
+  while (samples.length > 2 && samples[1].at < now - 60_000) samples.shift();
+}
+
+function showRunTiming(run, update) {
+  if (runTiming.id !== run?.id) runTiming = {id: run?.id, samples: []};
+  const active = run?.status === 'running';
+  const terminal = ['complete', 'failed', 'stopped'].includes(run?.status);
+  const now = Date.now();
+  if (active) runTiming.lastRunningAt = now;
+  const start = Date.parse(run?.started_at ?? run?.created_at);
+  const finished = Date.parse(run?.finished_at);
+  const elapsedUntil = active ? now : Number.isFinite(finished) ? finished : runTiming.lastRunningAt;
+  const panel = byId('run-timing');
+  panel.hidden = !run || run.mesh_only || run.result_source === 'sample'
+    || !Number.isFinite(start) || !Number.isFinite(elapsedUntil);
+  if (panel.hidden) {
+    notice('run-timing-note', '');
+    return;
+  }
+  byId('run-elapsed').textContent = formatDuration((elapsedUntil - start) / 1000);
+  byId('run-remaining-card').hidden = terminal;
+  byId('run-finish-card').hidden = terminal && !Number.isFinite(finished);
+  if (terminal) {
+    if (Number.isFinite(finished)) {
+      notice('run-timing-note', '');
+      byId('run-finish-label').textContent = run.status === 'complete' ? '실제 완료 시각' : '실제 종료 시각';
+      byId('run-finish').textContent = runTimeFormat.format(finished);
+    } else {
+      notice('run-timing-note', '경과 시간은 마지막 진행 확인 시각 기준입니다.');
+    }
+    return;
+  }
+
+  byId('run-finish-label').textContent = '예상 완료 시각';
+  byId('run-finish').textContent = '—';
+  const remaining = byId('run-remaining');
+  if (run.stop_requested || run.finish_requested || run.stage !== 'foamRun') {
+    remaining.textContent = run.stop_requested ? '중지 요청됨' : run.finish_requested ? '결과 저장 중'
+      : run.stage === 'postprocess' ? '후처리 중' : '솔버 시작 대기';
+    notice('run-timing-note', '');
+    return;
+  }
+
+  const sampledAt = performance.now();
+  recordTimingSample(run, update, sampledAt);
+  const first = runTiming.samples[0], last = runTiming.samples.at(-1);
+  const windowMs = last && first ? last.at - first.at : 0;
+  if (runTiming.samples.length < 3 || windowMs < 8_000 || sampledAt - last.at > 30_000) {
+    remaining.textContent = '진행 속도 측정 중';
+    notice('run-timing-note', '');
+    return;
+  }
+  const transient = run.setup.mode === 'transient';
+  const target = transient ? run.setup.end_time_s : steadyIterationLimit;
+  const remainingMs = (target - last.progress) * windowMs / (last.progress - first.progress);
+  const estimatedFinish = now + remainingMs;
+  if (!(remainingMs > 0 && estimatedFinish <= 8.64e15)) {
+    remaining.textContent = '완료 시각 계산 중';
+    notice('run-timing-note', '');
+    return;
+  }
+  remaining.textContent = formatDuration(Math.ceil(remainingMs / 1000));
+  byId('run-finish').textContent = runTimeFormat.format(estimatedFinish);
+  notice('run-timing-note', transient
+    ? '최근 해석 진행 속도로 추정한 솔버 완료 시각입니다. Δt와 계산 속도에 따라 달라집니다.'
+    : '최대 2,000회 반복 기준입니다. 수렴 기준에 도달하면 더 일찍 끝납니다.');
+}
+
 function showProgress(run) {
   const output = byId('open-run-output');
   output.hidden = run?.status !== 'complete';
   output.textContent = run?.mesh_only ? '생성 격자 보기' : '해석 결과 보기';
   output.onclick = () => navigateStep(run.mesh_only ? 'mesh' : 'results');
   const sample = run?.result_source === 'sample';
-  badge(byId('run-status'), ...(sample ? ['시험용 데이터', 'warning'] : (states[run?.status] ?? states.queued)));
+  const status = run?.status === 'complete' && run.finished_early ? ['조기 완료', 'success']
+    : (states[run?.status] ?? states.queued);
+  badge(byId('run-status'), ...(sample ? ['시험용 데이터', 'warning'] : status));
   byId('flow-stages').hidden = sample;
   byId('run-description').textContent = run
     ? run.id + ' · ' + runLabel(run) + (run.source_mesh_id ? ' (' + run.source_mesh_id + ')' : '')
@@ -434,8 +542,13 @@ function showProgress(run) {
     byId('run-name').value=run.label || '';
   }
   byId('stop-run').hidden=!run || !['running','queued'].includes(run.status);
-  byId('stop-run').disabled=Boolean(run?.stop_requested);
+  byId('stop-run').disabled=Boolean(run?.stop_requested || run?.finish_requested || (run && requestingFinish === run.id));
   byId('stop-run').textContent=run?.stop_requested ? '중지 요청됨' : run?.status==='queued' ? '대기 취소' : '해석 중단';
+  const finish = byId('finish-run');
+  finish.hidden = sample || run?.status !== 'running' || run.setup?.mode !== 'transient'
+    || (run.stage !== 'foamRun' && !run.finish_requested);
+  finish.disabled = Boolean(run?.finish_requested || run?.stop_requested || (run && requestingFinish === run.id));
+  finish.textContent = run?.finish_requested ? '결과 저장 중' : '여기까지 계산하고 결과 보기';
   const saved=run?.setup?.cad_revision;
   byId('run-version').textContent=saved ? (run.setup.project_name || '')+' · CAD '+saved+
     (currentRevision && currentRevision!==saved?' · 현재 형상 버전과 다름':'') : '';
@@ -456,6 +569,7 @@ function showProgress(run) {
     else step.removeAttribute('aria-current');
     step.querySelector('small').textContent = label;
   });
+  showRunTiming(run);
   showRunFailure(run);
 }
 
@@ -603,7 +717,7 @@ async function loadMeshPreview(resetView) {
       meshViewport.setModel({domain,wireframe:surface.wireframe});
       meshViewport.setFocus('domain');
       if(resetView) meshViewport.fit();
-      notice('mesh-preview-status', '직교성 최솟값 ' + format(q.minimum) + ' · 0.9 미달 ' + format(q.below) + '셀 (표시 ' + format(q.points.length) + '개)');
+      notice('mesh-preview-status', '직교성 최솟값 ' + formatOrthogonality(q.minimum) + ' · 0.9 미달 ' + formatCount(q.below) + '셀 (표시 ' + formatCount(q.points.length) + '개)');
       byId('mesh-canvas').setAttribute('aria-label','직교 품질 미달 셀 위치');
       return;
     }
@@ -635,7 +749,7 @@ async function loadMeshPreview(resetView) {
       ? label + ' 단면, ' + byId('mesh-position-value').textContent : '입구·출구·벽 ' + label + ' 표면');
     let message = '';
     if (!model.domain) message = '현재 위치를 지나는 격자 셀이 없습니다.';
-    else if (axis) message = '단면의 격자 셀 ' + format(data.section_cells) + '개';
+    else if (axis) message = '단면의 격자 셀 ' + formatCount(data.section_cells) + '개';
     if (axis && wireframe) message += ' · 전체 외곽 와이어프레임';
     if (data.truncated || wireframe?.truncated) message += (message ? ' · ' : '') + '화면에 격자의 일부를 표시합니다.';
     notice('mesh-preview-status', message);
@@ -695,25 +809,25 @@ function showMesh(run) {
   byId('mesh-details').hidden = !mesh;
   if (mesh) {
     const measurements = [
-      ['Total Cells (전체 셀)', format(mesh.cells)],
-      ['Nodes (격자점)', format(mesh.nodes)],
-      quality ? ['Minimum Orthogonality (최소 직교성)', format(quality.min)]
+      ['Total Cells (전체 셀)', formatCount(mesh.cells)],
+      ['Nodes (격자점)', formatCount(mesh.nodes)],
+    quality ? ['Minimum Orthogonality (최소 직교성)', formatOrthogonality(quality.min)]
         : ['Inlet Area (입구 면적)', format(mesh.inlet_area_mm2, 'mm²')],
     ];
     readouts.replaceChildren(...measurements.map(([term, value]) => description(term, value)));
   }
   const rows = mesh ? [
     ['Mesh Method (격자 방식)', meshNames[mesh.method] || mesh.method],
-    [isHex ? 'Hex Cells (육면체 셀)' : 'Total Cells (전체 셀)', format(mesh.cells)],
-    ...(mesh.cell_types ? [['육면체 / 삼각기둥', [mesh.cell_types.hexahedra, mesh.cell_types.prisms].map(n => format(n)).join(' / ')]] : []),
-    ['격자점', format(mesh.nodes)],
+    [isHex ? 'Hex Cells (육면체 셀)' : 'Total Cells (전체 셀)', formatCount(mesh.cells)],
+    ...(mesh.cell_types ? [['육면체 / 삼각기둥', [mesh.cell_types.hexahedra, mesh.cell_types.prisms].map(formatCount).join(' / ')]] : []),
+    ['격자점', formatCount(mesh.nodes)],
     ['입구 면적', format(mesh.inlet_area_mm2, 'mm²')],
     ['출구 면적', format(mesh.outlet_area_mm2, 'mm²')],
-    ['입구 / 출구 / 벽 격자면', [faces?.inlet, faces?.outlet, faces?.walls].map((value) => format(value)).join(' / ')],
+    ['입구 / 출구 / 벽 격자면', [faces?.inlet, faces?.outlet, faces?.walls].map(formatCount).join(' / ')],
     ...(quality ? [
-      ['직교 품질 평균', format(quality.average)],
-      ['직교 품질 최댓값', format(quality.max)],
-      ['직교성 ' + format(quality.target_min) + ' 미달 셀', format(quality.below_target)],
+      ['직교 품질 평균', formatOrthogonality(quality.average)],
+      ['직교 품질 최댓값', formatOrthogonality(quality.max)],
+      ['직교성 ' + format(quality.target_min) + ' 미달 셀', formatCount(quality.below_target)],
     ] : [['최소 격자 품질 (SICN)', format(mesh.quality_min_sicn)]]),
   ] : [];
   byId('mesh-data').replaceChildren(...rows.map(([term, value]) => description(term, value)));
@@ -752,15 +866,14 @@ function drawChart(profile) {
   const projectX = (x) => left + (x - min) / (max - min) * (right - left);
   const projectY = (y) => bottom - y / speedMax * (bottom - top);
   const line = (x1, y1, x2, y2, className) => svgNode('line', {x1, y1, x2, y2, class: className});
-  const tick = new Intl.NumberFormat('ko-KR', {maximumSignificantDigits: 3, notation: 'compact'});
   const nodes = [];
   for (let index = 0; index <= 4; index++) {
     const fraction = index / 4;
     const xValue = min + fraction * (max - min), yValue = fraction * speedMax;
     const x = projectX(xValue), y = projectY(yValue);
     nodes.push(line(x, top, x, bottom, 'grid-line'), line(left, y, right, y, 'grid-line'));
-    nodes.push(svgNode('text', {x, y: 276, 'text-anchor': 'middle'}, tick.format(xValue)));
-    nodes.push(svgNode('text', {x: 90, y: y + 5, 'text-anchor': 'end'}, tick.format(yValue)));
+    nodes.push(svgNode('text', {x, y: 276, 'text-anchor': 'middle'}, formatDisplayNumber(xValue)));
+    nodes.push(svgNode('text', {x: 90, y: y + 5, 'text-anchor': 'end'}, formatDisplayNumber(yValue)));
   }
   nodes.push(line(left, bottom, right, bottom, 'axis-line'), line(left, top, left, bottom, 'axis-line'));
   nodes.push(svgNode('text', {x: (left + right) / 2, y: 306, class: 'axis-label', 'text-anchor': 'middle'}, axis.toUpperCase() + ' 좌표 (mm)'));
@@ -769,7 +882,7 @@ function drawChart(profile) {
     cx: projectX(locations[index]).toFixed(2), cy: projectY(point.speed_m_s).toFixed(2), r: 2.25, class: 'velocity-point',
   })));
   chart.replaceChildren(...nodes);
-  byId('chart-note').textContent = '셀 중심 표본 ' + format(points.length) + '개를 표시합니다. CSV에서 전체 셀 값을 확인할 수 있습니다.';
+  byId('chart-note').textContent = '셀 중심 표본 ' + formatCount(points.length) + '개를 표시합니다. CSV에서 전체 셀 값을 확인할 수 있습니다.';
 }
 
 function showResults(run) {
@@ -785,9 +898,12 @@ function showResults(run) {
   download('csv-link', run, 'csv', 'profile.csv');
   notice('sample-result-note', summary && run.result_source === 'sample'
     ? '표시 검증용 데이터입니다. OpenFOAM 솔버에서 계산한 유동 결과가 아닙니다.' : '');
+  notice('early-result-note', summary && run.finished_early
+    ? '사용자가 종료한 시점까지의 결과 · ' + format(Number(summary.time_directory), 's')
+      + ' / 설정한 종료 시각 ' + format(run.setup.end_time_s, 's') : '');
   contourPanel.setRun(live ? {...run, contours: true} : summary ? run : null);
   const form = byId('live-inlet');
-  form.hidden = !(run?.inlet_open && run.status === 'running');
+  form.hidden = !(run?.inlet_open && run.status === 'running' && !run.finish_requested);
   if (form.dataset.run !== (run?.id || '')) {
     form.dataset.run = run?.id || '';
     byId('live-rate').value = '';
@@ -813,12 +929,11 @@ function showResults(run) {
   ];
   const imbalance = summary.flux_imbalance_percent;
   const facts = [
-    ['전체 격자 수', format(summary.cells)],
+    ['전체 격자 수', formatCount(summary.cells)],
     ['Maximum Speed (최대 속력)', format(summary.max_speed_m_s, 'm/s')],
     ['셀 평균 속력', format(summary.mean_speed_m_s, 'm/s')],
-    ['경계 유량 불일치율', Number.isFinite(imbalance) && imbalance !== 0 && Math.abs(imbalance) < 0.001
-      ? imbalance.toExponential(2) + ' %' : format(imbalance, '%')],
-    [summary.mode === 'transient' ? '최종 해석 시간' : '최종 반복', summary.time_directory + (summary.mode === 'transient' ? ' s' : '')],
+    ['경계 유량 불일치율', format(imbalance, '%')],
+    [summary.mode === 'transient' ? '최종 해석 시간' : '최종 반복', summary.mode === 'transient' ? format(Number(summary.time_directory), 's') : formatCount(Number(summary.time_directory))],
   ];
   byId('pressure-data').replaceChildren(...pressure.map(([term, value]) => description(term, value)));
   byId('field-data').replaceChildren(...facts.map(([term, value]) => description(term, value)));
@@ -853,11 +968,11 @@ async function compareMeshes() {
       link.href = '/flow?run=' + row.id + '#results-title';
       link.textContent = meshNames[row.method] || row.method;
       tr.insertCell().append(link);
-      for (const value of [format(row.size), format(row.cells), row.quality == null ? '미기록' : format(row.quality),
+      for (const value of [format(row.size), formatCount(row.cells), row.quality == null ? '미기록' : formatOrthogonality(row.quality),
         row.max_angle == null ? '미기록' : format(row.max_angle), format(row.pressure),
         previous ? format(100*(row.pressure-previous)/Math.abs(previous))+' %' : '—',
         row.divisions ? [row.divisions.width,row.divisions.thickness,row.divisions.length].join(' × ') : '—',
-        row.imbalance == null ? '—' : Number(row.imbalance).toPrecision(3),
+        format(row.imbalance),
         row.converged == null ? '미기록' : row.converged ? '수렴' : '미수렴']) tr.insertCell().textContent = value;
     }
     out.replaceChildren(table);
@@ -871,7 +986,7 @@ async function compareMeshes() {
         if(comparison.dataset.run!==id || !byId('profiles-compare').checked) return;
         const speeds=await request(runPath+'/'+row.id+'/mid-profile');
         const tr=profiles.insertRow();
-        tr.insertCell().textContent=format(row.cells);
+        tr.insertCell().textContent=formatCount(row.cells);
         for(const v of speeds) tr.insertCell().textContent=v==null?'—':format(v);
       }
       if(comparison.dataset.run===id && byId('profiles-compare').checked) out.append(profiles);
@@ -914,6 +1029,10 @@ function showRun(run) {
     if (run.status === 'complete' && document.body.dataset.step === 'run') navigateStep('mesh');
   }
   showResults(run);
+  if (run && run.id === pendingFinishPreview && ['complete', 'failed', 'stopped'].includes(run.status)) {
+    pendingFinishPreview = null;
+    if (run.status === 'complete' && document.body.dataset.step === 'run') navigateStep('results');
+  }
   refreshButtons();
 }
 
@@ -963,9 +1082,9 @@ async function submitRun(event) {
     ...boundaryInputs('', inletArea()), mesh_mm: byId('mesh-size').valueAsNumber, mesh_method: byId('mesh-method').value,
     width_cells:byId('width-cells').valueAsNumber || null,height_cells:byId('height-cells').valueAsNumber || null,
     compute_backend: byId('compute-backend').value,
-    mode: byId('mode').value, end_time_s: byId('end-time').valueAsNumber,
+    mode: byId('mode').value,
     live: byId('mode').value === 'transient',
-    step_count: byId('time-step').valueAsNumber, mesh_only: meshOnly,
+    mesh_only: meshOnly,
   };
   submitting = true;
   refreshButtons();
@@ -1046,13 +1165,19 @@ function timedInputs(prefix) {
     if (!time.value || !rate.value) throw new Error('입구 유량을 바꿀 시각과 유량을 모두 입력하세요.');
     schedule.push({time_s: time.valueAsNumber, ml_min: rate.valueAsNumber});
   }
-  return {save_interval_s: byId(prefix + 'save-interval').valueAsNumber || null, flow_schedule: schedule};
+  return {
+    end_time_s: byId(prefix + 'end-time').valueAsNumber,
+    time_step_mode: byId(prefix + 'time-step-mode').value,
+    step_count: byId(prefix + 'time-step').valueAsNumber,
+    save_interval_s: byId(prefix + 'save-interval').valueAsNumber || null,
+    flow_schedule: schedule,
+  };
 }
 
 function showTransientFields(prefix) {
   const transient = byId(prefix + 'mode').value === 'transient';
   byId(prefix + 'transient-fields').hidden = !transient;
-  for (const id of ['end-time', 'time-step', 'save-interval']) byId(prefix + id).disabled = !transient;
+  for (const id of ['end-time', 'time-step-mode', 'time-step', 'save-interval']) byId(prefix + id).disabled = !transient;
   const fields = byId(prefix + 'schedule-fields');
   fields.disabled = !transient || fields.hidden;
   showTimeStep(prefix);
@@ -1122,7 +1247,11 @@ function openMeshSolveDialog() {
     'outlet-mode': setup.outlet_mode ?? 'target', 'outlet-pressure': setup.outlet_pressure_pa,
     temperature: setup.temperature_c ?? 20, 'reference-pressure': setup.reference_pressure_kpa ?? 101.325,
     'compute-backend': defaultComputeBackend(),
-    mode: setup.mode, 'end-time': setup.end_time_s ?? 0.1, 'time-step': setup.step_count ?? Math.max(1, Math.min(100000, Math.round((setup.end_time_s ?? 0.1) / (setup.time_step_s ?? 0.001)))), 'save-interval':setup.save_interval_s ?? '',
+    mode: setup.mode, 'end-time': setup.end_time_s ?? 0.1,
+    'time-step-mode': setup.time_step_mode ?? (setup.step_count ? 'fixed' : 'adaptive'),
+    'time-step': setup.step_count ?? setup.requested_step_count
+      ?? Math.max(1, Math.min(100000, Math.round((setup.end_time_s ?? 0.1) / (setup.time_step_s ?? 0.001)))),
+    'save-interval': setup.save_interval_s ?? '',
   };
   for (const [field, value] of Object.entries(values)) byId('saved-' + field).value = value;
   const inletArea = sourceInletArea(solveSource);
@@ -1147,7 +1276,6 @@ async function submitSavedMesh(event) {
     fluid: byId('saved-fluid').value, rho: byId('saved-rho').valueAsNumber, mu: byId('saved-mu').valueAsNumber,
     compute_backend: byId('saved-compute-backend').value,
     ...boundaryInputs('saved-', sourceInletArea(source)), mode: byId('saved-mode').value,
-    end_time_s: byId('saved-end-time').valueAsNumber, step_count: byId('saved-time-step').valueAsNumber,
     live: byId('saved-mode').value === 'transient',
   };
   submitting = true;
@@ -1230,6 +1358,24 @@ byId('stop-run').onclick = async () => {
   await controlRun('stop', {});
   if (!shownRun?.stop_requested) button.disabled = false;
 };
+byId('finish-run').onclick = async () => {
+  const run = shownRun;
+  if (!run || requestingFinish || run.finish_requested || run.stop_requested) return;
+  requestingFinish = run.id;
+  showProgress(run);
+  notice('request-error', '');
+  try {
+    await request(runPath + '/' + run.id + '/finish', {});
+    pendingFinishPreview = run.id;
+    if (shownRun?.id === run.id) shownRun = null;
+    await refresh();
+  } catch (error) {
+    notice('request-error', error.message);
+  } finally {
+    requestingFinish = null;
+    showProgress(shownRun);
+  }
+};
 byId('live-inlet').onsubmit = async event => {
   event.preventDefault();
   const id = shownRun.id;
@@ -1259,6 +1405,7 @@ for (const prefix of ['', 'saved-']) {
   byId(prefix + 'fluid').onchange = () => changeFluid(prefix);
   for (const id of ['rho', 'mu']) byId(prefix + id).oninput = () => { byId(prefix + 'fluid').value = 'custom'; };
   for (const id of ['end-time', 'time-step']) byId(prefix + id).oninput = () => showTimeStep(prefix);
+  byId(prefix + 'time-step-mode').onchange = () => showTimeStep(prefix);
   byId(prefix + 'mode').onchange = () => showTransientFields(prefix);
 }
 for (const prefix of ['', 'saved-']) {
@@ -1316,8 +1463,11 @@ navigateStep(currentStep(), false);
 function showTimeStep(prefix) {
   const end = byId(prefix + 'end-time').valueAsNumber;
   const count = byId(prefix + 'time-step').valueAsNumber;
+  const fixed = byId(prefix + 'time-step-mode').value === 'fixed';
+  byId(prefix + 'time-step-label').textContent = fixed ? 'Time Steps (시간 스텝 수)' : 'Base Steps (기준 스텝 수)';
   byId(prefix + 'time-step-preview').textContent = end > 0 && count > 0
-    ? '고정 시간 간격 Δt = ' + (end / count).toPrecision(5) + ' s' : '';
+    ? (fixed ? '고정 Δt = ' : '최대 Δt = ') + format(end / count, 's')
+      + (fixed ? '' : ' · Courant 수에 따라 실제 스텝 수가 늘어날 수 있습니다.') : '';
 }
 
 async function changeHistoryRun(id, action, body) {
@@ -1335,14 +1485,14 @@ async function changeHistoryRun(id, action, body) {
 }
 byId('archived-runs').onchange = refresh;
 
-function renderSpectrum(title, stats, reverse) {
+function renderSpectrum(title, stats, reverse, formatValue = format) {
   const section = document.createElement('section');
   const heading = document.createElement('h4');
   heading.textContent = title;
   const summary = document.createElement('dl');
   summary.className = 'quality-readouts';
   summary.append(...[['최소', stats.min], ['평균', stats.mean], ['최대', stats.max]]
-    .map(([name, value]) => description(name, format(value))));
+    .map(([name, value]) => description(name, formatValue(value))));
   const distribution = document.createElement('div');
   distribution.className = 'quality-distribution';
   distribution.setAttribute('aria-hidden', 'true');
@@ -1356,10 +1506,10 @@ function renderSpectrum(title, stats, reverse) {
     label.textContent = grades[grade];
     item.dataset.grade = grade;
     const range = document.createElement('span');
-    range.textContent = stats.bands[index] + '–' + stats.bands[index + 1];
+    range.textContent = format(stats.bands[index]) + '–' + format(stats.bands[index + 1]);
     const value = document.createElement('span');
     value.className = 'quality-count';
-    value.textContent = format(count) + '셀';
+    value.textContent = formatCount(count) + '셀';
     item.append(label, range, value);
     if (reverse) bands.prepend(item);
     else bands.append(item);
@@ -1383,12 +1533,41 @@ async function loadQuality(id) {
   try {
     const q = await request(runPath + '/' + id + '/quality-map');
     if (qualityRun !== id) return;
-    byId('quality-spectrum').replaceChildren(renderSpectrum('Orthogonality (직교성)', q.orthogonality, false),
+    byId('quality-spectrum').replaceChildren(renderSpectrum('Orthogonality (직교성)', q.orthogonality, false, formatOrthogonality),
       renderSpectrum('Skewness (각도 왜곡도)', q.skewness, true));
-    notice('quality-status', '직교성 0.9 미달 ' + format(q.below) + '셀');
+    notice('quality-status', '직교성 0.9 미달 ' + formatCount(q.below) + '셀');
   } catch (error) {
     if (qualityRun === id) notice('quality-status', error.message);
   }
+}
+
+function showStepDiagnostics(diagnostics, status) {
+  const current = diagnostics?.current;
+  const readings = [];
+  if (current?.delta_t != null) readings.push('Δt ' + format(current.delta_t, 's'));
+  if (current?.max_courant != null) readings.push('스텝 직전 최대 Co ' + format(current.max_courant));
+  if (Object.keys(current?.final ?? {}).length) {
+    const residuals = Object.entries(current.final).map(([field, value]) => field + ' ' + formatDisplayNumber(value));
+    readings.push((current.complete ? '최종 잔차' : '최근 보정 잔차') + ' · ' + residuals.join(' / '));
+  }
+  notice('solver-diagnostics', readings.join(' · '));
+
+  const first = diagnostics?.first_nonfinite ?? diagnostics?.first_repeated ?? diagnostics?.first_above;
+  const location = first ? '처음 ' + formatCount(first.step) + '스텝 / ' + format(first.time, 's') : '';
+  const prefix = status === 'complete' ? '완료 · ' : '';
+  let message = '';
+  if (diagnostics?.first_nonfinite) {
+    message = prefix + '수치 이상 · 유효하지 않은 잔차 또는 Co · ' + location;
+  } else if (diagnostics?.above_target) {
+    message = prefix + (diagnostics.first_repeated ? '수렴 경고' : '잔차 목표 초과');
+    message += ' · 최종 잔차 목표 ' + format(diagnostics.tolerance) + ' 초과 '
+      + formatCount(diagnostics.above_target) + '/' + formatCount(diagnostics.checked_steps) + '개 스텝 · ' + location;
+  } else if (status === 'complete') {
+    message = diagnostics?.checked_steps
+      ? '검사 가능했던 ' + formatCount(diagnostics.checked_steps) + '개 스텝의 최종 잔차가 목표 이내입니다.'
+      : '스텝별 최종 잔차를 판단할 로그가 없습니다.';
+  }
+  notice('solver-diagnostic-warning', message);
 }
 
 async function loadResiduals(run) {
@@ -1407,7 +1586,9 @@ async function loadResiduals(run) {
   const total = run?.setup?.step_count;
   if (newRun) {
     chart.replaceChildren();
-    notice('solver-step', transient ? '첫 시간 스텝 대기 중' + (total ? ' · 전체 ' + format(total) + '스텝' : '') : '');
+    notice('solver-diagnostics', '');
+    notice('solver-diagnostic-warning', '');
+    notice('solver-step', transient ? '첫 시간 스텝 대기 중' + (total ? ' · 전체 ' + formatCount(total) + '스텝' : '') : '');
     notice('residual-status', id ? '솔버 로그에서 잔차를 읽는 중…' : '');
   }
   if (!id) return;
@@ -1416,11 +1597,13 @@ async function loadResiduals(run) {
   try {
     const update = await request(runPath + '/' + id + '/residuals?progress=1', undefined, controller.signal);
     if (controller.signal.aborted) return;
+    if (live) showRunTiming(run, update);
     if (transient && update.step) {
-      const step = '시간 스텝 ' + format(update.step) + (total ? ' / ' + format(total) : '');
+      const step = '시간 스텝 ' + formatCount(update.step) + (total ? ' / ' + formatCount(total) : '');
       const time = ' · 해석 시간 ' + format(update.time, 's');
       notice('solver-step', step + time);
     }
+    if (transient) showStepDiagnostics(update.diagnostics, run.status);
     const rows = update.residuals;
     if (!rows.length) {
       notice('residual-status', live ? '첫 잔차가 기록되면 그래프가 표시됩니다.' : '솔버 잔차 기록이 없습니다.');
@@ -1440,10 +1623,11 @@ async function loadResiduals(run) {
     const svg = svgNode('svg', {viewBox:'0 0 '+width+' '+height, role:'img', 'aria-label':'OpenFOAM 압력 및 속도 성분 초기 잔차'});
     for (let e = high; e >= low; e -= Math.ceil((high-low)/6)) {
       svg.append(svgNode('line',{x1:x0,y1:y(e),x2:x1,y2:y(e),stroke:'currentColor',opacity:0.3}),
-        svgNode('text',{x:x0-8,y:y(e)+4,fill:'currentColor','text-anchor':'end'},'1e'+e));
+        svgNode('text',{x:x0-8,y:y(e)+4,fill:'currentColor','text-anchor':'end'},format(10 ** e)));
     }
+    const formatAxis = run.setup.mode === 'steady' ? formatCount : formatDisplayNumber;
     svg.append(svgNode('text',{x:(x0+x1)/2,y:252,fill:'currentColor','text-anchor':'middle'},
-      (run.setup.mode === 'steady' ? '반복 단계' : '해석 시간 (s)') + ' · ' + rows[0].time + '–' + rows.at(-1).time));
+      (run.setup.mode === 'steady' ? '반복 단계' : '해석 시간 (s)') + ' · ' + formatAxis(rows[0].time) + '–' + formatAxis(rows.at(-1).time)));
     for (const [field,color] of fields) {
       const points = rows.filter(row => row[field] != null);
       const windowSize = Math.max(1, Math.ceil(points.length / 1200));

@@ -260,10 +260,41 @@ class SavedMeshFlowTest(unittest.TestCase):
         self.assertEqual(detail["failure"]["message"], "OpenFOAM 격자 검사에서 1개 항목을 통과하지 못했습니다.")
         self.assertEqual(detail["failure"]["log"], "log.checkMesh")
 
+    def test_finish_transient_run_preserves_completed_fields_before_planned_end(self):
+        solver = FakeSolver()
+        step_ready, proceed = threading.Event(), threading.Event()
+
+        def capture(store, command, case, log):
+            if command[0] == "foamRun":
+                log.write_text("Time = 0.04s\nExecutionTime = 1 s  ClockTime = 1 s\n", encoding="utf-8")
+                step_ready.set()
+                if not proceed.wait(5) or not (case / "flowformStop").is_file():
+                    raise ValueError("The solver did not receive the finish signal")
+            return solver.capture(store, command, case, log)
+
+        with local_server(self.runs_dir, solver_available=True, capture=capture) as url:
+            status, accepted = self.start(url, end_time_s=0.08)
+            self.assertEqual(status, 202, accepted)
+            path = f"{RUNS_PATH}/{accepted['id']}"
+            try:
+                self.assertTrue(step_ready.wait(5))
+                self.assertEqual(get_json(url, path + "/finish", data=b"{}")[0], 200)
+                self.assertEqual(get_json(url, path + "/stop", data=b"{}")[0], 409)
+            finally:
+                proceed.set()
+            detail = self.wait_for_run(url, accepted["id"])
+        self.assertEqual(detail["status"], "complete", detail)
+        self.assertTrue(detail["finished_early"])
+        self.assertEqual(detail["setup"]["end_time_s"], 0.08)
+        self.assertEqual(detail["summary"]["time_directory"], "0.04")
+        self.assertTrue(detail["files"]["csv"] and detail["contours"])
+        self.assertLessEqual(detail["started_at"], detail["finished_at"])
+
     def test_solver_failure_explains_transient_divergence(self):
         solver = FakeSolver(solver_error=(
-            "Courant Number mean: 4 max: 20000\nTime = 0.002s\n"
-            "Courant Number mean: 500 max: 2e8\nTime = 0.004s\n"
+            "Courant Number mean: 4 max: 20000\nCourant Number mean: 4 max: 20000\nTime = 0.002s\n"
+            "Courant Number mean: 15 max: 43000\nTime = 0.004s\n"
+            "Courant Number mean: 500 max: 2e8\nTime = 0.006s\n"
             "--> FOAM FATAL ERROR: \nGPU pressure residual 1.5e-05 failed convergence for p\n\nFOAM exiting\n"
         ))
         with local_server(self.runs_dir, solver_available=True, capture=solver.capture) as url:
@@ -272,11 +303,23 @@ class SavedMeshFlowTest(unittest.TestCase):
             detail = self.wait_for_run(url, accepted["id"])
         failure = detail["failure"]
         self.assertEqual(failure["title"], "비정상 해석 수치 발산")
-        self.assertIn("Δt 0.002 s", " ".join(failure["facts"]))
-        self.assertIn("20,000", " ".join(failure["facts"]))
+        self.assertIn("고정 Δt 0.002 s", " ".join(failure["facts"]))
+        self.assertIn("3스텝 / 0.006 s", " ".join(failure["facts"]))
+        self.assertIn("20,000 → 43,000 → 200,000,000", " ".join(failure["facts"]))
+        self.assertIn("고정 시간 간격이 커서", failure["message"])
         self.assertEqual(failure["excerpt"], "GPU pressure residual 1.5e-05 failed convergence for p")
         self.assertIn("입구 유량과 단위", failure["advice"])
+        self.assertIn("Adaptive", failure["advice"])
         self.assertEqual(failure["log"], "log.foamRun")
+
+    def test_transient_failure_distinguishes_fpe_configuration_from_an_actual_trap(self):
+        path = self.runs_dir / "log.foamRun"
+        run = {"stage": "foamRun", "setup": {"mode": "transient"}}
+        path.write_text("trapFpe: Floating point exception trapping enabled (FOAM_SIGFPE).\n", encoding="utf-8")
+        self.assertEqual(app.flow_failure(run, path)["title"], "솔버 실행 중단")
+        with path.open("a", encoding="utf-8") as source:
+            source.write("/bin/bash: Floating point exception (core dumped)\n")
+        self.assertEqual(app.flow_failure(run, path)["title"], "비정상 해석 수치 오류")
 
     def test_unknown_and_unavailable_runs_do_not_queue(self):
         solver = FakeSolver()

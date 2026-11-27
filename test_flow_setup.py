@@ -50,3 +50,20 @@ class RuntimeSetupTest(unittest.TestCase):
         ):
             self.assertIsNone(flow_setup.wsl_solver())
         probe.assert_called_once()
+
+    def test_adaptive_step_count_caps_delta_and_accepts_intermediate_flow_change(self):
+        body = dict(mode="transient", fluid="water", rho=998, mu=0.001, inlet_speed_m_s=0.2,
+                    outlet_pressure_pa=0, end_time_s=0.01, step_count=10,
+                    flow_schedule=[{"time_s": 0.0035, "ml_min": 12}])
+        adaptive = flow_setup.parse_conditions(dict(body, time_step_mode="adaptive"))
+        self.assertEqual(adaptive["requested_step_count"], 10)
+        self.assertEqual(adaptive["time_step_s"], 0.001)
+        self.assertNotIn("step_count", adaptive)
+        with self.assertRaisesRegex(ValueError, "유량 변경 시각"):
+            flow_setup.parse_conditions(dict(body, time_step_mode="fixed"))
+        restored = flow_setup.apply_conditions(adaptive, {"end_time_s": 0.02})
+        self.assertEqual(restored["time_step_s"], 0.002)
+        fixed = flow_setup.apply_conditions(adaptive, {"time_step_mode": "fixed", "step_count": 20,
+                                                       "flow_schedule": []})
+        self.assertEqual(fixed["step_count"], 20)
+        self.assertNotIn("requested_step_count", fixed)

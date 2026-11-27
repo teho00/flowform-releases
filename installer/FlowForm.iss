@@ -51,7 +51,10 @@ Source: "..\..\payload\MicrosoftEdgeWebview2Setup.exe"; Flags: dontcopy
 Name: "{group}\FlowForm"; Filename: "{app}\runtime\pythonw.exe"; Parameters: """{app}\app\installed_launch.py"""; WorkingDir: "{app}"; IconFilename: "{app}\app\channel_ui\flowform.ico"
 Name: "{group}\FlowForm - OpenFOAM setup"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoLogo -NoProfile -ExecutionPolicy RemoteSigned -File ""{app}\app\setup-openfoam.ps1"""; WorkingDir: "{app}"; IconFilename: "{app}\app\channel_ui\flowform.ico"
 Name: "{group}\FlowForm - 설치 안내"; Filename: "{app}\app\설치안내.txt"
-Name: "{autodesktop}\FlowForm (설치판)"; Filename: "{app}\runtime\pythonw.exe"; Parameters: """{app}\app\installed_launch.py"""; WorkingDir: "{app}"; IconFilename: "{app}\app\channel_ui\flowform.ico"; Tasks: desktopicon
+Name: "{autodesktop}\FlowForm"; Filename: "{app}\runtime\pythonw.exe"; Parameters: """{app}\app\installed_launch.py"""; WorkingDir: "{app}"; IconFilename: "{app}\app\channel_ui\flowform.ico"; Tasks: desktopicon
+
+[InstallDelete]
+Type: files; Name: "{autodesktop}\FlowForm (설치판).lnk"
 
 [Run]
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoLogo -NoProfile -ExecutionPolicy RemoteSigned -File ""{app}\app\setup-openfoam.ps1"""; Description: "{cm:SetupSolver}"; Flags: postinstall skipifsilent unchecked nowait

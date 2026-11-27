@@ -93,7 +93,7 @@ def model(document):
         try:
             bodies, domain, sketches, sketch_bodies, deleted_operations, fillet_corners = build(document)
             result = {"part": preview_bodies(bodies), "domain": preview(domain)}
-            if any(op.get("type") == "import" for op in document["operations"]):
+            if bodies:
                 caps = opening_caps(bodies)
                 result["openings"] = [{"ref": key, "bounds": bounds_of(cap),
                     "edges": [[v for p in curve_points(curve, 1 if curve.GetType() == GeomAbs_Line else 48) for v in p]

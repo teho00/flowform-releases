@@ -1,4 +1,4 @@
-import { createViewport } from '/cad-view.js';
+import { createViewport, formatCount, formatDisplayNumber as formatNumber } from '/cad-view.js';
 import {
   buildSketchChannel, editConnectedSketchCurve, recoverSketchChannels, roundSketchCorner, splitSketchCurve, trimSketchSegment,
 } from '/cad-sketch-tools.js';
@@ -30,8 +30,6 @@ const sketchJoinTolerance = 1e-7; // Millimetres, matching the model's line-loop
 const minimumCadDimension = 0.0001;
 const sketchGridStep = 1;
 const previewInterval = 100;
-const numberFormat = new Intl.NumberFormat('ko-KR', {maximumFractionDigits: 3});
-const formatNumber = (value) => numberFormat.format(value);
 const fields = Object.fromEntries(
   ['x', 'y', 'z', 'width', 'length', 'radius', 'height', 'dx', 'dy', 'dz']
     .map((key) => [key, byId(`field-${key}`)]),
@@ -160,15 +158,16 @@ function saveLocally(state) {
 function renderModelInfo() {
   const {part, domain} = model;
   byId('part-state').textContent = part ? '부품' : '빈 모델';
-  byId('part-solids').textContent = part ? formatNumber(part.solids) : '—';
+  byId('part-solids').textContent = part ? formatCount(part.solids) : '—';
   byId('part-volume').textContent = part ? `${formatNumber(part.volume)} mm³` : '—';
   byId('part-bounds').textContent = part
     ? `${part.bounds.slice(3).map((maximum, axis) => formatNumber(maximum - part.bounds[axis])).join(' × ')} mm`
     : '—';
   byId('layer-picker').hidden = !domain;
-  byId('domain-volume').hidden = !domain;
+  byId('domain-volume').hidden = !part && !domain;
   byId('clear-domain').hidden = !domain;
-  byId('domain-volume').textContent = domain ? `유체 체적 ${formatNumber(domain.volume)} mm³` : '';
+  byId('domain-volume').textContent = domain ? `유체 체적 ${formatNumber(domain.volume)} mm³`
+    : '내부 공간을 추출하거나 트리에서 절삭 피처를 유체 체적으로 지정하세요.';
   byId('empty-state').hidden = Boolean(part) || Boolean(activeSketchId) ||
     Boolean(model.sketches?.some((sketch) => sketch.entities.length)) || drawing || depthActive;
 }
@@ -1967,7 +1966,7 @@ byId('make-direct-domain').onclick = async () => {
 function renderCaps() {
   const panel = byId('port-extractor'), list = byId('cap-list');
   const caps = model.openings || [];
-  panel.hidden = !documentState.operations.some(op => op.type === 'import');
+  panel.hidden = !model.part;
   list.replaceChildren();
   for (const [i, cap] of caps.entries()) {
     const label = document.createElement('label'), input = document.createElement('input');

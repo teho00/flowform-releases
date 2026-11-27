@@ -78,6 +78,7 @@ FLOW_STAGE_TITLES = {
 LOG_NUMBER = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
 COURANT_MAX = re.compile(rf"^Courant Number[^\n]*\bmax:\s*({LOG_NUMBER})", re.MULTILINE)
 SOLVER_TIME = re.compile(rf"^Time\s*=\s*({LOG_NUMBER})", re.MULTILINE)
+STEP_TIMING = re.compile(rf"{COURANT_MAX.pattern}|{SOLVER_TIME.pattern}", re.MULTILINE)
 PRESSURE_FAILURE = re.compile(r"^GPU pressure residual .* failed convergence for p\s*$", re.MULTILINE)
 FLOW_DOWNLOADS = {
     "domain.msh": ("case/domain.msh", "application/octet-stream"),
@@ -142,6 +143,16 @@ def flow_failure(run, log):
     if setup.get("mode") != "transient":
         return report
 
+    numerical_failure = re.search(
+        r"Floating point exception[ \t]*(?:\(core dumped\))?[ \t]*\r?$"
+        r"|sigFpe::sigHandler|(?:Initial|Final) residual = [+-]?(?:nan|inf)\b",
+        tail, re.IGNORECASE | re.MULTILINE,
+    )
+    if numerical_failure:
+        report["title"] = "비정상 해석 수치 오류"
+        report["message"] = "솔버 로그에서 부동소수점 오류 또는 유효하지 않은 잔차가 확인되었습니다."
+        report["advice"] = "실패 시각의 입구 유량과 단위를 확인하고, 최대 시간 간격을 줄여 다시 실행하세요."
+
     def finite(value):
         if isinstance(value, (int, float)) and math.isfinite(value):
             return value
@@ -149,9 +160,9 @@ def flow_failure(run, log):
 
     end, steps, interval = map(finite, (setup.get("end_time_s"), setup.get("step_count"), setup.get("time_step_s")))
     if end is not None and steps and interval is not None:
-        report["facts"].append(f"시간 설정 · 총 {end:g} s / {steps:,g}스텝 / Δt {interval:g} s")
+        report["facts"].append(f"시간 설정 · 총 {end:g} s / {steps:,g}스텝 / 고정 Δt {interval:g} s")
     elif interval is not None:
-        report["facts"].append(f"설정 시간 간격 Δt · {interval:g} s")
+        report["facts"].append(f"설정 최대 시간 간격 Δt · {interval:g} s")
     speed = finite(setup.get("inlet_speed_m_s"))
     area = finite((setup.get("inlet") or {}).get("area_mm2"))
     rate = finite(run.get("applied_ml_min"))
@@ -163,15 +174,45 @@ def flow_failure(run, log):
         report["facts"].append(f"입구 조건 · {rate:,.6g} mL/min (평균 {speed:,.6g} m/s)")
     times = SOLVER_TIME.findall(tail)
     if times:
-        report["facts"].append(f"중단된 해석 시각 · {float(times[-1]):,.6g} s")
+        failed_time = float(times[-1])
+        step = round(failed_time / interval) if steps and interval else len(times) if size <= LOG_LIMIT else None
+        step_text = f"{step:,}스텝 / " if step else ""
+        report["facts"].append(f"중단 지점 · {step_text}{failed_time:,.6g} s")
     initial = COURANT_MAX.search(head)
-    recent = COURANT_MAX.findall(tail)
-    if initial and recent:
-        first, last = float(initial[1]), float(recent[-1])
-        report["facts"].append(f"최대 Courant 수 · 초기 {first:,.6g} / 중단 직전 {last:,.6g}")
-        if pressure and first >= 10 and last >= 5 * first:
+    courant = None
+    recent = []
+    for match in STEP_TIMING.finditer(tail):
+        if match[1] is not None:
+            courant = finite(float(match[1]))
+        elif courant is not None:
+            recent.append(courant)
+            courant = None
+    if initial and recent and (first := finite(float(initial[1]))) is not None:
+        last = recent[-1]
+        values = recent[-4:]
+        labels = [f"{value:,.0f}" if value >= 1_000 else f"{value:,.4g}" for value in values]
+        if len(recent) > len(values) or (size > LOG_LIMIT and values[0] != first):
+            first_label = f"{first:,.0f}" if first >= 1_000 else f"{first:,.4g}"
+            labels[:0] = [first_label, "…"]
+        report["facts"].append("스텝 직전 최대 Courant 수 · " + " → ".join(labels))
+        if (pressure or numerical_failure) and last >= max(10, 5 * first):
             report["title"] = "비정상 해석 수치 발산"
-            report["advice"] = "현재 유량과 격자에서 시간 간격이 큰 것으로 보입니다. 입구 유량과 단위를 확인한 뒤, 종료 시간을 줄이거나 스텝 수를 늘려 Δt를 줄이세요."
+            report["message"] = ("현재 유량과 격자에 비해 고정 시간 간격이 커서 Courant 수가 급등했고, 계산이 불안정해졌습니다."
+                                 if steps else "Courant 수가 급등하면서 계산이 불안정해졌습니다.")
+            mesh_size = finite(setup.get("mesh_mm"))
+            if mesh_size is not None:
+                report["facts"].append(f"목표 격자 크기 · {mesh_size:g} mm")
+            try:
+                initial_velocity = cfd_case.foam_text(log.parent / "0" / "U")
+            except OSError:
+                initial_velocity = ""
+            if re.search(r"\binternalField\s+uniform\s+\(0\s+0\s+0\)\s*;", initial_velocity):
+                report["facts"].append("초기 유동 · 정지 상태에서 입구 유속 적용")
+            if steps and interval and speed is not None:
+                distance = speed * interval * 1_000
+                report["facts"].append(f"입구 유속 × Δt · 한 스텝에 약 {distance:,.3g} mm")
+            report["advice"] = ("입구 유량과 단위를 확인한 뒤 Adaptive (자동 시간 간격)로 다시 실행하세요. 고정 모드에서는 스텝 수를 늘려 Δt를 줄이세요."
+                                if steps else "입구 유량과 단위를 확인하고, 기준 스텝 수를 늘려 최대 Δt를 줄여 다시 실행하세요.")
     return report
 
 
@@ -351,6 +392,7 @@ class FlowRuns(Runs):
             if label.is_file():
                 run["label"] = label.read_text(encoding="utf-8")
             run["stop_requested"] = (folder / "stop.request").exists()
+            run["finish_requested"] = (folder / "finish.request").exists()
         return run
 
     def check_stop(self, run):
@@ -365,6 +407,31 @@ class FlowRuns(Runs):
             self.update(run, status="stopped")
         if run["stage"] == "foamRun" and run["status"] == "running":
             (folder / "case/flowformStop").touch()
+
+    def request_finish(self, run):
+        if (run["status"] != "running" or run["stage"] != "foamRun"
+                or run["mesh_only"] or run["setup"]["mode"] != "transient" or run["stop_requested"]):
+            return False
+        if run["finish_requested"]:
+            return True
+        folder = self.directory / run["id"]
+        try:
+            with (folder / "case/log.foamRun").open("rb") as stream:
+                size = stream.seek(0, os.SEEK_END)
+                stream.seek(max(0, size - LOG_LIMIT))
+                has_step = re.search(rb"^ExecutionTime\s*=", stream.read(LOG_LIMIT), re.MULTILINE)
+        except FileNotFoundError:
+            has_step = False
+        if not (has_step or run.get("frame")):
+            return False
+        marker = folder / "finish.request"
+        marker.touch()
+        try:
+            (folder / "case/flowformStop").touch()
+        except OSError:
+            marker.unlink(missing_ok=True)
+            raise
+        return True
 
     def mesh_comparison(self, source):
         keys = ("mode", "fluid", "rho", "mu", "inlet_speed_m_s", "outlet_pressure_pa", "inlet", "outlet")
@@ -406,6 +473,7 @@ class FlowRuns(Runs):
         super().__init__(directory, demo)
         self.inlets = {}
         self.inlet_lock = Lock()
+        self.control_lock = Lock()
 
     def live_solve(self, run, case, command):
         setup = run["setup"]
@@ -426,11 +494,14 @@ class FlowRuns(Runs):
             template = template.replace("writeControl adjustableRunTime;", "writeControl timeStep;")
         frames = case / "live"
         frames.mkdir()
+        finish_marker = case.parent / "finish.request"
         start = case / "0"
         with self.inlet_lock:
             self.inlets[run["id"]] = rate
         try:
             for index, finish in enumerate(targets):
+                if index and finish_marker.exists():
+                    break
                 with self.inlet_lock:
                     at = targets[index-1] if index else 0.0
                     rate = scheduled.get(at, self.inlets[run["id"]])
@@ -452,15 +523,20 @@ class FlowRuns(Runs):
                 control.write_text(re.sub(r"writeInterval [^;]+;", f"writeInterval {writes};", config))
                 self.run_command(run, case, "foamRun", command)
                 start = cfd_case.latest_time(case)
-                if not math.isclose(float(start.name), float(target), rel_tol=1e-8):
+                finishing = finish_marker.exists()
+                if not finishing and not math.isclose(float(start.name), float(target), rel_tol=1e-8):
                     raise ValueError("솔버가 요청한 구간 끝에 도달하지 못했습니다.")
                 snapshot = frames / start.name
+                if finishing and snapshot.is_dir():
+                    break
                 snapshot.mkdir()
                 for field in ("p", "U"):
                     shutil.copyfile(start / field, snapshot / field)
                 history = run.setdefault("inlet_history", [])
                 history.append({"end_time_s": float(start.name), "ml_min": rate})
                 self.update(run, frame=start.name, frame_ml_min=rate)
+                if finishing:
+                    break
         finally:
             with self.inlet_lock:
                 self.inlets.pop(run["id"], None)
@@ -581,10 +657,21 @@ class FlowRuns(Runs):
             self.live_solve(run, case, command(env, case, "foamRun"))
         else:
             self.run_command(run, case, "foamRun", command(env, case, "foamRun"))
+        analysis_setup = setup
+        with self.control_lock:
+            self.check_stop(run)
+            finish_requested = (case.parent / "finish.request").exists()
+            if finish_requested:
+                end = float(cfd_case.latest_time(case).name)
+                if end < setup["end_time_s"] and not math.isclose(end, setup["end_time_s"], rel_tol=1e-8):
+                    analysis_setup = {**setup, "end_time_s": end}
+                    run["finished_early"] = True
+                (case / "flowformStop").unlink(missing_ok=True)
+            self.update(run, stage="postprocess", inlet_open=False)
         self.run_command(
             run, case, "postprocess", command(env, case, "foamPostProcess", "-latestTime", "-func", "writeCellCentres"),
         )
-        cfd_case.analyse(case, setup)
+        cfd_case.analyse(case, analysis_setup)
         summary, _ = cfd_case.read_results(case)
         mesh = json.loads((case / "mesh.json").read_text(encoding="utf-8"))
         if summary["cells"] != mesh["cells"]:
@@ -621,16 +708,16 @@ class FlowRuns(Runs):
         directory = self.directory / run["id"]
         case = directory / "case"
         setup = run["setup"]
-        self.update(run, status="running")
+        self.update(run, status="running", started_at=datetime.now(timezone.utc).isoformat())
         try:
             self.check_stop(run)
             self.prepare_case(run, case)
             if not run["mesh_only"]:
                 self.solve_case(run, case, setup)
             self.check_stop(run)
-            self.update(run, status="complete")
+            self.update(run, status="complete", finished_at=datetime.now(timezone.utc).isoformat())
         except RunStopped:
-            self.update(run,status="stopped",inlet_open=False)
+            self.update(run, status="stopped", inlet_open=False, finished_at=datetime.now(timezone.utc).isoformat())
         except (OSError, RuntimeError, ValueError, KeyError, TypeError) as error:
             failure_log = self.log_path(run, FLOW_LOGS[run["stage"]])
             try:
@@ -638,7 +725,7 @@ class FlowRuns(Runs):
                     output.write(f"\n{error}\n")
             except OSError:
                 pass
-            self.update(run, status="failed", error=str(error))
+            self.update(run, status="failed", error=str(error), finished_at=datetime.now(timezone.utc).isoformat())
 
 
 def configure_runs(server, directory, demo, *, flow_demo=None):
@@ -748,8 +835,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if action == "residuals":
                 log = store.log_path(run, FLOW_LOGS["foamRun"])
-                data = cfd_case.residual_progress(log)
-                if parse_qs(query).get("progress") == ["1"]:
+                progress = parse_qs(query).get("progress") == ["1"]
+                data = cfd_case.residual_progress(log, transient=progress and run["setup"]["mode"] == "transient")
+                if progress:
                     self.send_json(data)
                 else:
                     self.send_json(data["residuals"])
@@ -901,7 +989,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         solve = re.fullmatch(r"/api/flow/runs/([0-9a-f]{12})/solve", self.path)
         inlet = re.fullmatch(r"/api/flow/runs/([0-9a-f]{12})/inlet", self.path)
-        control = re.fullmatch(r"/api/flow/runs/([0-9a-f]{12})/(label|stop|archive|restore)", self.path)
+        control = re.fullmatch(r"/api/flow/runs/([0-9a-f]{12})/(label|stop|finish|archive|restore)", self.path)
         if control:
             store = self.server.flow_runs
             run = store.get(control[1])
@@ -923,10 +1011,17 @@ class Handler(BaseHTTPRequestHandler):
                 elif control[2] in ("archive", "restore"):
                     store.set_archived(run, control[2] == "archive")
                 else:
-                    if run["status"] not in ("running","queued"):
-                        self.send_json({"error":"이미 종료된 실행입니다."},409)
-                        return
-                    store.request_stop(run)
+                    with store.control_lock:
+                        run = store.get(control[1])
+                        if control[2] == "finish":
+                            if not store.request_finish(run):
+                                self.send_json({"error": "첫 스텝이 완료된 비정상 해석의 솔버 실행 중에 결과를 저장할 수 있습니다."}, 409)
+                                return
+                        else:
+                            if run["status"] not in ("running", "queued") or run["finish_requested"]:
+                                self.send_json({"error": "이미 종료됐거나 결과 저장 중인 실행입니다."}, 409)
+                                return
+                            store.request_stop(run)
                 self.send_json({"ok":True})
             except (ValueError,OSError):
                 self.send_json({"error":"요청을 저장하지 못했습니다."},400)
@@ -945,7 +1040,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             store = self.server.flow_runs
             with store.inlet_lock:
-                accepted = inlet[1] in store.inlets
+                accepted = inlet[1] in store.inlets and not (store.directory / inlet[1] / "finish.request").exists()
                 if accepted:
                     store.inlets[inlet[1]] = rate
             self.send_json({"ml_min": rate} if accepted else {"error": "유량 변경 가능 구간이 종료되었습니다."}, 202 if accepted else 409)

@@ -74,6 +74,31 @@ class CfdCaseTests(unittest.TestCase):
         self.assertIn("maxDeltaT 0.0001;", self.stored("system/controlDict"))
         self.assertIn("writeInterval 0.02;", self.stored("system/controlDict"))
 
+    def test_transient_diagnostics_keep_last_final_solve_and_skip_unfinished_steps(self):
+        log = self.case / "log.foamRun"
+        bad_step = ("Courant Number mean: 0.1 max: 0.8\nTime = {time}s\n"
+                    "smoothSolver: Solving for Ux, Initial residual = 0.3, Final residual = 1e-12\n"
+                    "GAMG: Solving for p, Initial residual = 0.7, Final residual = 1e-3\n"
+                    "GAMG: Solving for p, Initial residual = 0.1, Final residual = 2e-8\n")
+        log.write_text(bad_step.format(time=0.001) + "End\n" + bad_step.format(time=0.0015), encoding="utf-8")
+        data = cfd_case.residual_progress(log, transient=True)
+        self.assertEqual(data["residuals"][0]["p"], 0.7)
+        diagnostics = data["diagnostics"]
+        self.assertEqual(diagnostics["checked_steps"], 1)
+        self.assertIsNone(diagnostics["first_repeated"])
+        current = diagnostics["current"]
+        self.assertAlmostEqual(current["delta_t"], 0.0005)
+        self.assertEqual(current["max_courant"], 0.8)
+        self.assertEqual(current["final"]["p"], 2e-8)
+        with log.open("a") as source:
+            source.write("End\nCourant Number mean: 0 max: inf\nTime = 0.002s\n"
+                         "GAMG: Solving for p, Initial residual = nan, Final residual = nan\n")
+        diagnostics = cfd_case.residual_progress(log, transient=True)["diagnostics"]
+        self.assertEqual(diagnostics["above_target"], 2)
+        self.assertEqual(diagnostics["first_repeated"], {"step": 1, "time": 0.001})
+        self.assertEqual(diagnostics["first_nonfinite"], {"step": 3, "time": 0.002})
+        self.assertIsNone(diagnostics["current"]["max_courant"])
+
     def test_analysis_uses_area_weights_and_retains_full_velocity_csv(self):
         self.fixture("200")
         (self.case / "log.foamRun").write_text("SIMPLE solution converged in 200 iterations")
