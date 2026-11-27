@@ -49,6 +49,9 @@ STATIC = {
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
     "/cad": ("cad.html", "text/html; charset=utf-8"),
     "/workspace.css": ("workspace.css", "text/css; charset=utf-8"),
+    "/fonts/PretendardVariable.woff2": ("fonts/PretendardVariable.woff2", "font/woff2"),
+    "/fonts/JetBrainsMono-Regular.woff2": ("fonts/JetBrainsMono-Regular.woff2", "font/woff2"),
+    "/fonts/JetBrainsMono-Bold.woff2": ("fonts/JetBrainsMono-Bold.woff2", "font/woff2"),
     "/flowform.svg": ("flowform.svg", "image/svg+xml"),
     "/favicon.ico": ("flowform.ico", "image/x-icon"),
     "/cad.css": ("cad.css", "text/css; charset=utf-8"),
@@ -68,6 +71,14 @@ FLOW_LOGS = {
     "prepare": "log.prepare", "mesh": "log.gmsh", "convert": "log.gmshToFoam",
     "checkMesh": "log.checkMesh", "foamRun": "log.foamRun", "postprocess": "log.postprocess",
 }
+FLOW_STAGE_TITLES = {
+    "prepare": "케이스 준비 실패", "mesh": "격자 생성 실패", "convert": "격자 변환 실패",
+    "checkMesh": "격자 검사 실패", "foamRun": "솔버 실행 중단", "postprocess": "후처리 실패",
+}
+LOG_NUMBER = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
+COURANT_MAX = re.compile(rf"^Courant Number[^\n]*\bmax:\s*({LOG_NUMBER})", re.MULTILINE)
+SOLVER_TIME = re.compile(rf"^Time\s*=\s*({LOG_NUMBER})", re.MULTILINE)
+PRESSURE_FAILURE = re.compile(r"^GPU pressure residual .* failed convergence for p\s*$", re.MULTILINE)
 FLOW_DOWNLOADS = {
     "domain.msh": ("case/domain.msh", "application/octet-stream"),
     "case.zip": ("case.zip", "application/zip"),
@@ -87,6 +98,81 @@ python3 cfd_case.py analyse .
 Check that checkMesh reports Mesh OK before starting foamRun.
 The results are written to analysis/summary.json and analysis/profile.csv.
 '''
+
+
+def flow_failure(run, log):
+    stage = run.get("stage")
+    title = FLOW_STAGE_TITLES.get(stage, "실행 실패")
+    message = run.get("error") or "실행 중 오류가 발생했습니다."
+    report = {"title": title, "message": message, "facts": [], "advice": "", "log": None, "excerpt": ""}
+    if log is None:
+        return report
+    try:
+        with log.open("rb") as source:
+            head = source.read(LOG_LIMIT).decode("utf-8", errors="replace")
+            size = source.seek(0, os.SEEK_END)
+            source.seek(max(0, size - LOG_LIMIT))
+            tail = source.read(LOG_LIMIT).decode("utf-8", errors="replace")
+    except OSError:
+        return report
+    report["log"] = log.name
+
+    fatal = list(re.finditer(r"^\s*-->\s*FOAM FATAL (IO )?ERROR:\s*\n", tail, re.MULTILINE))
+    if fatal:
+        body = tail[fatal[-1].end():].lstrip()
+        report["excerpt"] = body.split("\n\n", 1)[0][:420].strip()
+        if fatal[-1][1]:
+            report["message"] = "OpenFOAM이 케이스의 입력 파일을 읽는 중 오류를 발견했습니다."
+    elif stage == "mesh":
+        errors = [line.strip() for line in tail.splitlines() if "격자 생성에 실패했습니다." in line]
+        if errors:
+            report["message"] = errors[-1][:420]
+    elif stage == "checkMesh":
+        checks = list(re.finditer(r"^\s*Failed (\d+) mesh checks?\.", tail, re.MULTILINE))
+        if checks:
+            report["message"] = f"OpenFOAM 격자 검사에서 {checks[-1][1]}개 항목을 통과하지 못했습니다."
+
+    if stage != "foamRun":
+        return report
+    pressure = PRESSURE_FAILURE.search(tail)
+    if pressure:
+        report["message"] = "GPU 압력 솔버가 압력 잔차의 수렴 기준을 충족하지 못했습니다."
+        report["excerpt"] = pressure[0].strip()[:420]
+    setup = run.get("setup") or {}
+    if setup.get("mode") != "transient":
+        return report
+
+    def finite(value):
+        if isinstance(value, (int, float)) and math.isfinite(value):
+            return value
+        return None
+
+    end, steps, interval = map(finite, (setup.get("end_time_s"), setup.get("step_count"), setup.get("time_step_s")))
+    if end is not None and steps and interval is not None:
+        report["facts"].append(f"시간 설정 · 총 {end:g} s / {steps:,g}스텝 / Δt {interval:g} s")
+    elif interval is not None:
+        report["facts"].append(f"설정 시간 간격 Δt · {interval:g} s")
+    speed = finite(setup.get("inlet_speed_m_s"))
+    area = finite((setup.get("inlet") or {}).get("area_mm2"))
+    rate = finite(run.get("applied_ml_min"))
+    if area and area > 0 and rate is not None:
+        speed = rate / (60 * area)
+    elif area and area > 0 and speed is not None:
+        rate = 60 * area * speed
+    if speed is not None and rate is not None:
+        report["facts"].append(f"입구 조건 · {rate:,.6g} mL/min (평균 {speed:,.6g} m/s)")
+    times = SOLVER_TIME.findall(tail)
+    if times:
+        report["facts"].append(f"중단된 해석 시각 · {float(times[-1]):,.6g} s")
+    initial = COURANT_MAX.search(head)
+    recent = COURANT_MAX.findall(tail)
+    if initial and recent:
+        first, last = float(initial[1]), float(recent[-1])
+        report["facts"].append(f"최대 Courant 수 · 초기 {first:,.6g} / 중단 직전 {last:,.6g}")
+        if pressure and first >= 10 and last >= 5 * first:
+            report["title"] = "비정상 해석 수치 발산"
+            report["advice"] = "현재 유량과 격자에서 시간 간격이 큰 것으로 보입니다. 입구 유량과 단위를 확인한 뒤, 종료 시간을 줄이거나 스텝 수를 늘려 Δt를 줄이세요."
+    return report
 
 
 def environment(demo):
@@ -387,8 +473,16 @@ class FlowRuns(Runs):
         (directory / "domain.step").write_bytes(step)
         return self.queue_run(run_id, setup)
 
+    def saved_mesh_method(self, run):
+        metadata = self.directory / run["id"] / "case" / "mesh.json"
+        try:
+            return json.loads(metadata.read_text(encoding="utf-8"))["method"]
+        except (OSError, ValueError, KeyError, TypeError):
+            return None
+
     def can_reuse(self, run):
-        return run["status"] in ("complete", "failed") and self.download(run, "domain.msh") is not None
+        return (run["status"] in ("complete", "failed") and self.download(run, "domain.msh") is not None
+                and self.saved_mesh_method(run) in flow_setup.MESH_METHODS)
 
     def start_from_mesh(self, source, setup):
         run_id = uuid.uuid4().hex[:12]
@@ -425,6 +519,10 @@ class FlowRuns(Runs):
     def detail(self, run):
         detail = dict(run, summary=None, profile=None, mesh=None, mesh_reusable=self.can_reuse(run))
         detail["logs"] = [name for name in FLOW_LOGS.values() if self.log_path(run, name).is_file()]
+        if run["status"] == "failed":
+            log_name = FLOW_LOGS.get(run.get("stage"))
+            log = self.log_path(run, log_name) if log_name in detail["logs"] else None
+            detail["failure"] = flow_failure(run, log)
         detail["files"] = {
             key: self.download(run, action) is not None
             for key, action in (("mesh", "domain.msh"), ("case", "case.zip"), ("csv", "profile.csv"))
@@ -463,6 +561,7 @@ class FlowRuns(Runs):
         self.archive_case(case)
 
     def solve_case(self, run, case, setup):
+        method = flow_setup.require_mesh_method(self.saved_mesh_method(run))
         env = flow_setup.environment(self.demo)
         if not env["solver_ready"]:
             raise RuntimeError(" ".join(env["solver_problems"]))
@@ -472,8 +571,12 @@ class FlowRuns(Runs):
         self.run_command(run, case, "convert", command(env, case, "gmshToFoam", "domain.msh"))
         cfd_case.set_wall_type(case)
         check_log = self.run_command(run, case, "checkMesh", command(env, case, "checkMesh"))
-        if not any(line.strip() == "Mesh OK." for line in check_log.read_text(encoding="utf-8").splitlines()):
+        mesh_check = check_log.read_text(encoding="utf-8")
+        if not any(line.strip() == "Mesh OK." for line in mesh_check.splitlines()):
             raise RuntimeError("checkMesh가 격자를 통과시키지 못했습니다. log.checkMesh를 확인하세요.")
+        tetrahedra = re.search(r"^\s*tetrahedra:\s*(\d+)\s*$", mesh_check, re.MULTILINE)
+        if method in flow_setup.HEX_MESH_METHODS and tetrahedra and int(tetrahedra[1]) > 0:
+            raise ValueError("선택한 헥스 격자에 사면체 셀이 포함되어 있습니다.")
         if setup.get("live"):
             self.live_solve(run, case, command(env, case, "foamRun"))
         else:
@@ -881,7 +984,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"error": "선택한 격자의 실행 기록을 찾지 못했습니다."}, 404)
             return
         if not store.can_reuse(source):
-            self.send_json({"error": "격자 생성이 완료된 실행을 선택하세요."}, 409)
+            error = "격자 생성이 완료된 실행을 선택하세요."
+            if store.download(source, "domain.msh") is not None:
+                error = "저장 격자의 생성 방식을 확인할 수 없습니다. 새 격자를 생성하세요."
+            self.send_json({"error": error}, 409)
             return
         if self.headers.get_content_type() != "application/json":
             self.send_json({"error": "해석 조건을 JSON으로 보내세요."}, 415)
@@ -909,10 +1015,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_json({"error":"세분화 비교는 정상 해석을 선택하세요."}, 400)
                     return
                 case = store.directory / source["id"] / "case"
-                method = changes.get("mesh_method") or json.loads((case/"mesh.json").read_text())["method"]
-                if method not in ("hex-sweep", "hex-dominant", "gmsh-tetra", "tetra-hxt"):
-                    self.send_json({"error":"지원하지 않는 격자 방식입니다."}, 400)
-                    return
+                method = flow_setup.require_mesh_method(changes.get("mesh_method", store.saved_mesh_method(source)))
                 step = (case / "domain.step").read_bytes()
                 group = uuid.uuid4().hex[:12]
                 runs = []
@@ -924,6 +1027,9 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"ids":runs}, 202)
                 return
             run = store.start_from_mesh(source, setup)
+        except ValueError as error:
+            self.send_json({"error": str(error)}, 400)
+            return
         except OSError as error:
             self.send_json({"error": f"실행 폴더를 만들 수 없습니다. {error}"}, 500)
             return

@@ -1,10 +1,11 @@
-"""Generate a tetrahedral Gmsh mesh for the exact CAD fluid volume."""
+"""Generate a volume mesh for the selected CAD fluid region."""
 
 import argparse
 import json
 import math
 import os
 from pathlib import Path
+from flow_setup import DEFAULT_MESH_METHOD, HEX_MESH_METHODS, require_mesh_method
 
 
 MAX_CELLS = 500_000
@@ -83,6 +84,7 @@ def configure(gmsh, size):
 
 
 def build_mesh(gmsh, setup):
+    method = require_mesh_method(setup.get("mesh_method", DEFAULT_MESH_METHOD))
     size = positive_number(setup["mesh_mm"], "격자 크기")
     configure(gmsh, size)
     gmsh.model.add("fluid_domain")
@@ -100,9 +102,10 @@ def build_mesh(gmsh, setup):
     outlet = match_face(gmsh, surfaces, setup["outlet"], "출구")
     if inlet == outlet:
         raise ValueError("입구와 출구는 서로 다른 면이어야 합니다.")
-    if setup.get("mesh_method") in ("hex-sweep", "hex-dominant"):
+    if method in HEX_MESH_METHODS:
         from cfd_sweep import generate
-        return generate(gmsh, setup, surfaces, volume, inlet, outlet, size, ESTIMATED_CELL_LIMIT)
+        return generate(gmsh, {**setup, "mesh_method": method}, surfaces, volume, inlet, outlet,
+                        size, ESTIMATED_CELL_LIMIT)
     walls = [tag for tag in surfaces if tag not in (inlet, outlet)]
     if not walls:
         raise ValueError("입구와 출구 외에 유체 체적의 벽면이 필요합니다.")
@@ -118,7 +121,7 @@ def build_mesh(gmsh, setup):
     for name, tags in patches.items():
         gmsh.model.addPhysicalGroup(2, tags, PATCH_IDS[name], name)
     gmsh.model.addPhysicalGroup(3, [volume], 4, "fluid")
-    if setup.get("mesh_method") == "tetra-hxt":
+    if method == "tetra-hxt":
         gmsh.option.setNumber("Mesh.Algorithm3D", 10)
     gmsh.model.mesh.generate(3)
 
@@ -134,7 +137,7 @@ def build_mesh(gmsh, setup):
         raise ValueError("품질 지표가 0 이하인 사면체가 있습니다. 격자 크기나 형상을 조정하세요.")
     gmsh.write("domain.msh")
     return {
-        "method": setup.get("mesh_method", "gmsh-tetra"),
+        "method": method,
         "mesh_mm": size,
         "cells": len(tetrahedra),
         "nodes": len(gmsh.model.mesh.getNodes()[0]),

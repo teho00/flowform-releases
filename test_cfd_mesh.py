@@ -18,24 +18,17 @@ HERE = Path(__file__).resolve().parent
 @unittest.skipUnless(cad_model.KERNEL_READY and gmsh_available(), "CAD and Gmsh are required")
 class MeshTests(unittest.TestCase):
     def make_input(self, case):
-        from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeFace, BRepBuilderAPI_MakePolygon
-        from OCP.BRepPrimAPI import BRepPrimAPI_MakePrism
-        from OCP.gp import gp_Pnt, gp_Vec
+        from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
 
-        outline = BRepBuilderAPI_MakePolygon()
-        for x, y in ((0, 0), (3, 0), (3, 3), (0, 3), (0, 2), (2, 2), (2, 1), (0, 1)):
-            outline.Add(gp_Pnt(x, y, 0))
-        outline.Close()
-        section = BRepBuilderAPI_MakeFace(outline.Wire()).Face()
-        domain = BRepPrimAPI_MakePrism(section, gp_Vec(0, 0, 0.5)).Shape()
+        domain = BRepPrimAPI_MakeBox(3, 1, 0.5).Shape()
         writer = cad_model.STEPControl_Writer()
         self.assertEqual(writer.Transfer(domain, cad_model.STEPControl_AsIs), cad_model.IFSelect_RetDone)
         self.assertEqual(writer.Write(str(case / "domain.step")), cad_model.IFSelect_RetDone)
         setup = {"mesh_mm": 0.22}
-        for name, y in (("inlet", 0), ("outlet", 2)):
+        for name, x in (("inlet", 0), ("outlet", 3)):
             setup[name] = {
-                "center_mm": [0, y + 0.5, 0.25],
-                "bounds_mm": [0, y, 0, 0, y + 1, 0.5],
+                "center_mm": [x, 0.5, 0.25],
+                "bounds_mm": [x, 0, 0, x, 1, 0.5],
                 "area_mm2": 0.5,
             }
         return setup
@@ -48,15 +41,15 @@ class MeshTests(unittest.TestCase):
             env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         )
 
-    def test_coplanar_ports_and_export_units(self):
+    def test_hexahedral_ports_and_export_units(self):
         with tempfile.TemporaryDirectory() as directory:
             case = Path(directory)
-            setup = self.make_input(case)
+            setup = {**self.make_input(case), "mesh_method": "hex-sweep"}
             result = self.generate(case, setup)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             report = json.loads((case / "mesh.json").read_text(encoding="utf-8"))
-            self.assertAlmostEqual(report["volume_mm3"], 3.5)
-            self.assertGreater(report["quality_min_sicn"], 0)
+            self.assertAlmostEqual(report["volume_mm3"], 1.5)
+            self.assertGreater(report["orthogonal_quality"]["min"], 0.9)
             text = (case / "domain.msh").read_text(encoding="ascii")
             node_lines = text.split("$Nodes\n")[1].split("$EndNodes")[0].splitlines()[1:]
             points = {}
@@ -71,18 +64,47 @@ class MeshTests(unittest.TestCase):
             element_lines = text.split("$Elements\n")[1].split("$EndElements")[0].splitlines()[1:]
             for line in element_lines:
                 _, kind, tag_count, tag, *remaining = line.split()
-                self.assertEqual(kind, "4" if tag == "4" else "2")
+                self.assertEqual(kind, "5" if tag == "4" else "3")
                 physical_faces[int(tag)].append(remaining[int(tag_count) - 1:])
             self.assertEqual(len(physical_faces[4]), report["cells"])
             for patch in ("inlet", "outlet", "walls"):
                 faces = physical_faces[physical_tags[patch]]
                 self.assertGreater(len(faces), 0)
                 self.assertEqual(len(faces), report["patch_faces"][patch])
-            for tag, ymin in ((1, 0), (2, 0.002)):
+            for tag, x in ((1, 0), (2, 0.003)):
                 port_points = [points[node] for face in physical_faces[tag] for node in face]
-                self.assertTrue(all(abs(point[0]) < 1e-10 for point in port_points))
-                self.assertAlmostEqual(min(point[1] for point in port_points), ymin)
-                self.assertAlmostEqual(max(point[1] for point in port_points), ymin + 0.001)
+                self.assertTrue(all(abs(point[0] - x) < 1e-10 for point in port_points))
+                self.assertAlmostEqual(min(point[1] for point in port_points), 0)
+                self.assertAlmostEqual(max(point[1] for point in port_points), 0.001)
+
+    def test_explicit_tetrahedral_mesh_methods(self):
+        with tempfile.TemporaryDirectory() as directory:
+            case = Path(directory)
+            setup = self.make_input(case)
+            for method in ("gmsh-tetra", "tetra-hxt"):
+                with self.subTest(method=method):
+                    result = self.generate(case, {**setup, "mesh_method": method})
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    report = json.loads((case / "mesh.json").read_text(encoding="utf-8"))
+                    self.assertEqual(report["method"], method)
+                    text = (case / "domain.msh").read_text(encoding="ascii")
+                    elements = text.split("$Elements\n")[1].split("$EndElements")[0].splitlines()[1:]
+                    self.assertEqual({row.split()[1] for row in elements if row.split()[3] == "4"}, {"4"})
+
+    def test_hex_dominant_contains_only_hexahedra_and_prisms(self):
+        with tempfile.TemporaryDirectory() as directory:
+            case = Path(directory)
+            setup = self.make_input(case)
+            result = self.generate(case, setup)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            report = json.loads((case / "mesh.json").read_text(encoding="utf-8"))
+            self.assertEqual(report["method"], "hex-dominant")
+            self.assertGreater(report["cell_types"]["hexahedra"], 0)
+            self.assertGreater(report["cell_types"]["prisms"], 0)
+            text = (case / "domain.msh").read_text(encoding="ascii")
+            elements = text.split("$Elements\n")[1].split("$EndElements")[0].splitlines()[1:]
+            fluid_types = {parts[1] for parts in map(str.split, elements) if parts[3] == "4"}
+            self.assertEqual(fluid_types, {"5", "6"})
 
     def test_invalid_port_has_no_mesh(self):
         with tempfile.TemporaryDirectory() as directory:

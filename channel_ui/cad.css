@@ -79,12 +79,14 @@ h1, h2, p, dl, dd, ol { margin: 0; }
   min-height: 645px;
   height: calc(100vh - 139px);
   gap: 12px;
+  min-width: 0;
   padding: 12px clamp(10px, 1.5vw, 22px) 16px;
 }
 .pane, .scene { min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); }
-.pane { overflow-y: auto; }
+.pane { overflow-y: auto; scrollbar-width: thin; }
 .pane-heading, .scene-header { display: flex; align-items: center; justify-content: space-between; min-height: 47px; gap: 8px; padding: 9px 13px; border-bottom: 1px solid var(--line); }
-.pane h1, .pane h2 { font-size: .89rem; }
+.pane h1, .pane h2 { font-size: .93rem; }
+.pane .secondary { line-height: 1.5; word-break: keep-all; }
 .part-card, .pane-section { padding: 13px; }
 .part-card > p { margin-bottom: 10px; color: var(--accent); font-size: .84rem; font-weight: 650; }
 .model-stats { display: grid; gap: 7px; font-size: .77rem; }
@@ -125,8 +127,8 @@ h1, h2, p, dl, dd, ol { margin: 0; }
 .scene-name .secondary { padding-inline-start: 5px; font-weight: 400; }
 .workspace-mode { display: inline-block; padding: 3px 7px; border: 1px solid #405773; border-radius: 5px; }
 .workspace-mode[data-mode="sketch"] { border-color: #638cba; color: var(--accent); background: var(--accent-field); }
-.view-actions { display: flex; gap: 4px; flex-wrap: wrap; }
-.view-actions button { min-height: 27px; padding: 3px 7px; font-size: .75rem; }
+.view-actions { display: flex; min-width: 0; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+.view-actions button { min-height: 30px; padding: 3px 7px; font-size: .78rem; }
 .viewport { position: relative; flex: 1; min-height: 390px; isolation: isolate; background: #101b2a; }
 .viewport canvas { position: absolute; display: block; width: 100%; height: 100%; inset: 0; touch-action: none; }
 .viewport canvas:focus-visible { outline-offset: -2px; }
@@ -250,8 +252,9 @@ input[type="number"], select { min-width: 0; width: 100%; padding: 7px 6px; bord
   .tool-group + .tool-group { border-left: 0; padding-left: 0; }
   .workbench { display: flex; flex-direction: column; }
   .scene { order: -2; min-height: 450px; }
-  .inspector { order: -1; }
   .scene-name { white-space: normal; }
+  .scene-header { flex-wrap: wrap; }
+  .view-actions { justify-content: flex-start; }
   .view-actions button { min-height: 28px; }
   .viewport { min-height: 330px; }
 }

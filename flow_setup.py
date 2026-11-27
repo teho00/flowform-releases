@@ -10,6 +10,9 @@ from pathlib import Path
 
 
 COMMANDS = ("gmshToFoam", "checkMesh", "foamRun", "foamPostProcess")
+HEX_MESH_METHODS = ("hex-sweep", "hex-dominant")
+MESH_METHODS = (*HEX_MESH_METHODS, "gmsh-tetra", "tetra-hxt")
+DEFAULT_MESH_METHOD = "hex-dominant"
 FLUIDS = ("air", "water", "hydrogen", "custom")
 GPU_BIN_DIR = "/opt/openfoam14/platforms/linux64GccDPInt32Opt/bin"
 FOAM_BASHRC = "/opt/openfoam14/etc/bashrc"
@@ -223,6 +226,12 @@ def parse_conditions(body):
     return setup
 
 
+def require_mesh_method(method):
+    if method not in MESH_METHODS:
+        raise ValueError("지원하지 않는 격자 방식입니다.")
+    return method
+
+
 def parse(body):
     if not isinstance(body, dict) or not isinstance(body.get("document"), dict):
         raise ValueError("현재 CAD 프로젝트를 전송하세요.")
@@ -233,17 +242,14 @@ def parse(body):
     if type(mesh_only) is not bool:
         raise ValueError("실행 방식이 올바르지 않습니다.")
     setup = parse_conditions(body)
-    method = body.get("mesh_method", "gmsh-tetra")
-    if method not in ("hex-sweep", "hex-dominant", "gmsh-tetra", "tetra-hxt"):
-        raise ValueError("지원하는 격자 방식을 선택하세요.")
-    if method != "gmsh-tetra":
-        setup["mesh_method"] = method
-    if method in ("hex-sweep", "hex-dominant"):
-        for key in ("width_cells","height_cells"):
+    setup["mesh_method"] = require_mesh_method(body.get("mesh_method", DEFAULT_MESH_METHOD))
+    if setup["mesh_method"] in HEX_MESH_METHODS:
+        for key in ("width_cells", "height_cells"):
             if body.get(key) is not None:
                 count = body[key]
-                if type(count) is not int or not 2 <= count <= 512: raise ValueError("단면 분할 수는 2~512 정수로 입력하세요.")
-                setup[key]=count
+                if type(count) is not int or not 2 <= count <= 512:
+                    raise ValueError("단면 분할 수는 2~512 정수로 입력하세요.")
+                setup[key] = count
     setup.update(mesh_only=mesh_only, mesh_mm=number(body, "mesh_mm", "목표 격자 크기 (mm)", minimum=0.0001))
     return setup, (inlet, outlet)
 

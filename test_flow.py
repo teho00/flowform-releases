@@ -52,6 +52,7 @@ class FlowHandoffTest(unittest.TestCase):
                 self.assertEqual(post("/api/flow/runs", dict(setup, outlet_ref=inlet["ref"]))[0], 400)
                 self.assertEqual(post("/api/flow/runs", dict(setup, outlet_ref="stale-reference"))[0], 400)
                 self.assertEqual(post("/api/flow/runs", dict(setup, mesh_only=False))[0], 503)
+                self.assertEqual(post("/api/flow/runs", dict(setup, mesh_method="unknown"))[0], 400)
                 status, accepted = post("/api/flow/runs", setup)
                 self.assertEqual(status, 202, accepted)
                 route = f"/api/flow/runs/{accepted['id']}"
@@ -64,6 +65,7 @@ class FlowHandoffTest(unittest.TestCase):
                 self.assertEqual(detail["status"], "complete", detail)
                 self.assertEqual(detail["stage"], "mesh")
                 self.assertGreater(detail["mesh"]["cells"], 0)
+                self.assertEqual(detail["mesh"]["method"], "hex-dominant")
                 self.assertAlmostEqual(detail["mesh"]["inlet_area_mm2"], 0.5)
                 self.assertAlmostEqual(detail["mesh"]["outlet_area_mm2"], 0.5)
                 self.assertEqual(detail["files"], {"mesh": True, "case": True, "csv": False})

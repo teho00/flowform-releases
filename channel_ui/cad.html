@@ -32,10 +32,10 @@
       <button type="button" id="new-sketch-xy" aria-controls="reference-plane-picker">기준면 스케치</button>
       <button type="button" id="new-sketch-face" title="먼저 3D 솔리드에서 평면 면을 선택하세요">선택면 스케치</button>
       <button type="button" id="finish-sketch" class="minor" title="3D 모델링으로 돌아가기 (D)" aria-keyshortcuts="D" hidden>3D 모델링으로 돌아가기</button>
-      <button type="button" id="activate-pull" title="3D 돌출·절삭 및 면 편집 (P)" aria-keyshortcuts="P">당기기</button>
+      <button type="button" id="activate-pull" title="3D 돌출·절삭 및 면 편집 (P)" aria-keyshortcuts="P">Pull (당기기)</button>
     </div>
     <div class="tool-group" aria-label="스케치 도구">
-      <span class="ribbon-label">스케치 도구</span>
+      <span class="ribbon-label">Sketch Tools (스케치 도구)</span>
       <button type="button" id="sketch-select" data-sketch-tool="select" title="선택 (S)" aria-keyshortcuts="S">선택</button>
       <button type="button" id="sketch-move" data-sketch-tool="move" title="스케치 이동 (M)" aria-keyshortcuts="M" hidden>이동</button>
       <button type="button" id="sketch-point" data-sketch-tool="point">점</button>
@@ -69,12 +69,12 @@
         </dl>
       </div>
       <div class="pane-section feature-pane">
-        <h2>파트 및 피처</h2>
+        <h2>Parts &amp; Features <small>(파트 및 피처)</small></h2>
         <p class="secondary" id="features-empty">작성한 파트와 스케치가 여기에 표시됩니다.</p>
         <ol id="feature-list" aria-label="파트별 피처 이력"></ol>
       </div>
       <div class="pane-section exports">
-        <h2>유체 체적</h2>
+        <h2>Fluid Domain <small>(유체 체적)</small></h2>
         <details id="port-extractor" hidden><summary>STEP 내부 공간 추출</summary>
           <p class="secondary">같은 유로의 개구부를 목록 또는 뷰포트에서 선택하세요.</p>
           <div id="cap-list"></div><button type="button" id="extract-caps">선택한 공간 추출</button>
@@ -101,8 +101,8 @@
           <button type="button" data-view="right" aria-pressed="false">우측면</button>
           <button type="button" id="view-plan" title="현재 스케치 평면을 정면으로 보기 (V)" aria-keyshortcuts="V" aria-pressed="false">평면 보기</button>
           <button type="button" id="view-fit">맞춤</button>
-          <button type="button" id="inspect-section" aria-pressed="false" aria-controls="section-controls">단면 검사</button>
-          <button type="button" id="snap-toggle" aria-pressed="true" title="스케치를 격자 교점과 원점에 맞춥니다.">스냅</button>
+          <button type="button" id="inspect-section" aria-pressed="false" aria-controls="section-controls">Section (단면 검사)</button>
+          <button type="button" id="snap-toggle" aria-pressed="true" title="스케치를 격자 교점과 원점에 맞춥니다.">Snap (스냅)</button>
         </div>
       </div>
       <div class="viewport" id="viewport" data-mode="model">
@@ -133,7 +133,7 @@
         <span class="depth-dimension" id="depth-dimension" aria-hidden="true" hidden></span>
         <button type="button" id="depth-handle" class="depth-handle" aria-label="돌출 높이 드래그" title="Z 방향으로 드래그해 높이 또는 깊이를 조절합니다." hidden>↕</button>
         <form id="dimension-editor" class="dimension-editor" aria-labelledby="dimension-title" autocomplete="off" hidden>
-          <h2 id="dimension-title">치수 편집</h2>
+          <h2 id="dimension-title">Dimensions (치수 편집)</h2>
           <div id="dimension-fields" class="dimension-fields"></div>
           <div class="dimension-actions">
             <button type="button" id="dimension-cancel">취소</button>
@@ -188,8 +188,8 @@
         <label class="field" id="pull-mode-field" for="pull-mode"><span>영역 끌기 작업</span>
           <select id="pull-mode" disabled>
             <option value="auto">자동 (끌기 방향 기준)</option>
-            <option value="join">돌출·결합</option>
-            <option value="cut">절삭</option>
+            <option value="join">Extrude &amp; Join (돌출·결합)</option>
+            <option value="cut">Cut (절삭)</option>
           </select>
         </label>
         <div class="sketch-edit-actions">

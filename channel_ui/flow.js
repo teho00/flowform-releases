@@ -88,6 +88,7 @@ async function request(path, body, signal) {
 let cadVolume=0;
 function sweepEstimate() {
   const hex = byId('mesh-method').value.startsWith('hex-');
+  byId('mesh-method-note').textContent = hex ? '일정한 직사각 단면을 지원합니다.' : '';
   byId('sweep-settings').hidden=!hex;
   if (!hex) return;
   const face=planarFaces.get(ports.inlet.value);
@@ -124,11 +125,13 @@ function refreshButtons() {
   const savedGrid = canReuseMesh(shownRun);
   const solverReady = canRunSolver();
   byId('solve-mesh-button').disabled = submitting || !savedGrid || !solverReady;
+  byId('refine-three').disabled = submitting || !savedGrid || !solverReady;
   byId('mesh-solve-fields').disabled = submitting;
   byId('mesh-solve-cancel').disabled = submitting;
   byId('mesh-solve-submit').disabled = submitting || !solverReady;
   byId('mesh-solve-availability').textContent = !savedGrid
-    ? '격자가 저장되면 이 격자로 해석할 수 있습니다.'
+    ? shownRun?.files?.mesh ? '저장 격자의 생성 방식을 확인할 수 없습니다. 새 격자를 생성하세요.'
+      : '격자가 저장되면 이 격자로 해석할 수 있습니다.'
     : !environment ? 'OpenFOAM 실행 환경 확인 중'
     : solverReady ? '선택한 격자와 입구·출구를 그대로 사용합니다.'
     : environment.solver_problems?.[0] || 'OpenFOAM Foundation v14가 준비되면 이 격자로 해석할 수 있습니다.';
@@ -139,7 +142,7 @@ function canRunSolver() {
 }
 
 function canReuseMesh(run) {
-  return Boolean(run?.files?.mesh && ['complete', 'failed'].includes(run.status));
+  return run?.mesh_reusable === true;
 }
 
 function defaultComputeBackend() {
@@ -388,6 +391,31 @@ function showHistory(runs) {
   if (focused) [...list.querySelectorAll('button')].find((button) => button.dataset.run === focused)?.focus({preventScroll: true});
 }
 
+function showRunFailure(run) {
+  const panel = byId('run-error');
+  panel.hidden = run?.status !== 'failed';
+  if (panel.hidden) return;
+  const failure = run.failure ?? {title: '실행 실패', message: run.error || '실행 중 오류가 발생했습니다.',
+    log: logForStage[run.stage]};
+  const key = JSON.stringify([run.id, failure]);
+  if (panel.dataset.failure === key) return;
+  panel.dataset.failure = key;
+  byId('run-error-title').textContent = failure.title;
+  byId('run-error-message').textContent = failure.message;
+  const facts = byId('run-error-facts');
+  facts.replaceChildren(...(failure.facts || []).map(text => {
+    const item = document.createElement('li');
+    item.textContent = text;
+    return item;
+  }));
+  facts.hidden = !facts.children.length;
+  notice('run-error-advice', failure.advice || '');
+  notice('run-error-excerpt', failure.excerpt || '');
+  const button = byId('run-error-log');
+  button.hidden = !run.logs?.includes(failure.log);
+  button.dataset.log = button.hidden ? '' : failure.log;
+}
+
 function showProgress(run) {
   const output = byId('open-run-output');
   output.hidden = run?.status !== 'complete';
@@ -428,7 +456,7 @@ function showProgress(run) {
     else step.removeAttribute('aria-current');
     step.querySelector('small').textContent = label;
   });
-  notice('run-error', run?.error || '');
+  showRunFailure(run);
 }
 
 function updateLogs(run) {
@@ -662,12 +690,21 @@ function showMesh(run) {
   const faces = mesh?.patch_faces;
   const quality = mesh?.orthogonal_quality;
   const isHex = mesh?.method === 'hex-sweep';
-  notice('mesh-quality-summary', quality
-    ? '직교 품질 최솟값 ' + format(quality.min) + ' · ' +
-      '기준 ' + format(quality.target_min) + ' 미달 ' + format(quality.below_target) + '셀' : '');
+  const readouts = byId('mesh-quality-summary');
+  readouts.hidden = !mesh;
+  byId('mesh-details').hidden = !mesh;
+  if (mesh) {
+    const measurements = [
+      ['Total Cells (전체 셀)', format(mesh.cells)],
+      ['Nodes (격자점)', format(mesh.nodes)],
+      quality ? ['Minimum Orthogonality (최소 직교성)', format(quality.min)]
+        : ['Inlet Area (입구 면적)', format(mesh.inlet_area_mm2, 'mm²')],
+    ];
+    readouts.replaceChildren(...measurements.map(([term, value]) => description(term, value)));
+  }
   const rows = mesh ? [
-    ['격자 방식', meshNames[mesh.method] || mesh.method],
-    [isHex ? '육면체 셀' : '전체 셀', format(mesh.cells)],
+    ['Mesh Method (격자 방식)', meshNames[mesh.method] || mesh.method],
+    [isHex ? 'Hex Cells (육면체 셀)' : 'Total Cells (전체 셀)', format(mesh.cells)],
     ...(mesh.cell_types ? [['육면체 / 삼각기둥', [mesh.cell_types.hexahedra, mesh.cell_types.prisms].map(n => format(n)).join(' / ')]] : []),
     ['격자점', format(mesh.nodes)],
     ['입구 면적', format(mesh.inlet_area_mm2, 'mm²')],
@@ -676,6 +713,7 @@ function showMesh(run) {
     ...(quality ? [
       ['직교 품질 평균', format(quality.average)],
       ['직교 품질 최댓값', format(quality.max)],
+      ['직교성 ' + format(quality.target_min) + ' 미달 셀', format(quality.below_target)],
     ] : [['최소 격자 품질 (SICN)', format(mesh.quality_min_sicn)]]),
   ] : [];
   byId('mesh-data').replaceChildren(...rows.map(([term, value]) => description(term, value)));
@@ -756,6 +794,7 @@ function showResults(run) {
     byId('live-message').textContent = '';
   }
   if (!form.hidden) byId('live-rate').placeholder = format(run.applied_ml_min);
+  byId('result-readouts').hidden = !summary;
   if (!summary) {
     byId('pressure-data').replaceChildren();
     byId('field-data').replaceChildren();
@@ -768,15 +807,17 @@ function showResults(run) {
   resultKey = key;
   if (!summary) return;
   const pressure = [
-    ['입구 평균 압력', format(summary.inlet_pressure_pa, 'Pa')],
-    ['출구 평균 압력', format(summary.outlet_pressure_pa, 'Pa')],
-    ['압력차 (입구 − 출구)', format(summary.pressure_drop_pa, 'Pa')],
+    ['Pressure Drop (압력차)', format(summary.pressure_drop_pa, 'Pa')],
+    ['Inlet Pressure (입구 평균 압력)', format(summary.inlet_pressure_pa, 'Pa')],
+    ['Outlet Pressure (출구 평균 압력)', format(summary.outlet_pressure_pa, 'Pa')],
   ];
+  const imbalance = summary.flux_imbalance_percent;
   const facts = [
     ['전체 격자 수', format(summary.cells)],
-    ['최대 속력', format(summary.max_speed_m_s, 'm/s')],
+    ['Maximum Speed (최대 속력)', format(summary.max_speed_m_s, 'm/s')],
     ['셀 평균 속력', format(summary.mean_speed_m_s, 'm/s')],
-    ['경계 유량 불일치율', format(summary.flux_imbalance_percent, '%')],
+    ['경계 유량 불일치율', Number.isFinite(imbalance) && imbalance !== 0 && Math.abs(imbalance) < 0.001
+      ? imbalance.toExponential(2) + ' %' : format(imbalance, '%')],
     [summary.mode === 'transient' ? '최종 해석 시간' : '최종 반복', summary.time_directory + (summary.mode === 'transient' ? ' s' : '')],
   ];
   byId('pressure-data').replaceChildren(...pressure.map(([term, value]) => description(term, value)));
@@ -810,7 +851,7 @@ async function compareMeshes() {
       if (row.id === id) tr.className = 'current-run';
       const link = document.createElement('a');
       link.href = '/flow?run=' + row.id + '#results-title';
-      link.textContent = row.method === 'hex-sweep' ? '육면체 스윕' : row.method === 'gmsh-tetra' ? '사면체' : row.method;
+      link.textContent = meshNames[row.method] || row.method;
       tr.insertCell().append(link);
       for (const value of [format(row.size), format(row.cells), row.quality == null ? '미기록' : format(row.quality),
         row.max_angle == null ? '미기록' : format(row.max_angle), format(row.pressure),
@@ -843,6 +884,7 @@ async function compareMeshes() {
 comparison.ontoggle = compareMeshes;
 byId('profiles-compare').onchange=compareMeshes;
 byId('refine-three').onclick = async event => {
+  if (!canReuseMesh(shownRun)) return;
   const button = event.currentTarget;
   button.disabled = true;
   try {
@@ -850,7 +892,7 @@ byId('refine-three').onclick = async event => {
     byId('refine-status').textContent = '거친·중간·미세 격자 순으로 계산합니다. 실행 기록 ' + result.ids.join(' · ');
     refresh();
   } catch (error) { byId('refine-status').textContent = error.message; }
-  finally { button.disabled = false; }
+  finally { refreshButtons(); }
 };
 
 function showRun(run) {
@@ -957,7 +999,7 @@ function addScheduleRow(prefix, values = {}) {
   if (list.children.length >= 100) return;
   const row = document.createElement('div');
   row.className = 'schedule-row';
-  for (const [key, title] of [['time_s', '변경 시각 (s)'], ['ml_min', '입구 유량 (mL/min)']]) {
+  for (const [key, title] of [['time_s', 'Time (변경 시각) · s'], ['ml_min', 'Flow Rate (입구 유량) · mL/min']]) {
     const label = document.createElement('label');
     label.className = 'field';
     label.textContent = title;
@@ -979,16 +1021,26 @@ function addScheduleRow(prefix, values = {}) {
   list.append(row);
 }
 
+function setScheduleOpen(prefix, open) {
+  const toggle = byId(prefix + 'schedule-toggle');
+  const fields = byId(prefix + 'schedule-fields');
+  toggle.setAttribute('aria-expanded', String(open));
+  fields.hidden = !open;
+  fields.disabled = !open || byId(prefix + 'mode').value !== 'transient';
+}
+
 function resetSchedule(prefix, rows = []) {
   byId(prefix + 'schedule').replaceChildren();
   if (rows.length) rows.forEach(row => addScheduleRow(prefix, row));
   else addScheduleRow(prefix);
+  setScheduleOpen(prefix, rows.length > 0);
 }
 
 function timedInputs(prefix) {
   if (byId(prefix + 'mode').value !== 'transient') return {};
   const schedule = [];
-  for (const row of byId(prefix + 'schedule').children) {
+  const rows = byId(prefix + 'schedule-fields').disabled ? [] : byId(prefix + 'schedule').children;
+  for (const row of rows) {
     const [time, rate] = row.querySelectorAll('input');
     if (!time.value && !rate.value) continue;
     if (!time.value || !rate.value) throw new Error('입구 유량을 바꿀 시각과 유량을 모두 입력하세요.');
@@ -1000,7 +1052,9 @@ function timedInputs(prefix) {
 function showTransientFields(prefix) {
   const transient = byId(prefix + 'mode').value === 'transient';
   byId(prefix + 'transient-fields').hidden = !transient;
-  for (const id of ['end-time', 'time-step', 'save-interval', 'schedule-fields']) byId(prefix + id).disabled = !transient;
+  for (const id of ['end-time', 'time-step', 'save-interval']) byId(prefix + id).disabled = !transient;
+  const fields = byId(prefix + 'schedule-fields');
+  fields.disabled = !transient || fields.hidden;
   showTimeStep(prefix);
 }
 
@@ -1016,7 +1070,7 @@ function showInletUnits(prefix, selected) {
   select.replaceChildren(...Object.keys(inletUnits[kind]).map(unit => new Option(unit, unit)));
   if (selected && Object.hasOwn(inletUnits[kind], selected)) select.value = selected;
   select.dataset.previous = select.value;
-  byId(prefix + 'inlet-value-label').textContent = kind === 'flow' ? '입구 체적 유량' : '입구 속도';
+  byId(prefix + 'inlet-value-label').textContent = kind === 'flow' ? 'Flow Rate (유량)' : 'Velocity (속도)';
 }
 
 function setInletValue(prefix, speed, area) {
@@ -1212,17 +1266,27 @@ for (const prefix of ['', 'saved-']) {
   byId(prefix + 'inlet-condition').onchange = () => changeInletUnits(prefix, area(), true);
   byId(prefix + 'inlet-unit').onchange = () => changeInletUnits(prefix, area(), false);
   byId(prefix + 'outlet-mode').onchange = () => showOutletFields(prefix);
+  byId(prefix + 'schedule-toggle').onclick = () => setScheduleOpen(prefix, byId(prefix + 'schedule-fields').hidden);
   byId(prefix + 'schedule-add').onclick = () => addScheduleRow(prefix);
   showInletUnits(prefix);
   showOutletFields(prefix);
   resetSchedule(prefix);
 }
 byId('inlet-value').oninput = updateInletEquivalent;
+byId('run-error-log').onclick = event => {
+  const log = event.currentTarget.dataset.log;
+  if (!shownRun?.logs?.includes(log)) return;
+  byId('log-select').value = log;
+  const panel = byId('log-panel');
+  panel.open = true;
+  showLog();
+  panel.scrollIntoView({block: 'nearest'});
+};
 byId('log-panel').ontoggle = () => { if (byId('log-panel').open) showLog(); };
 byId('log-select').onchange = showLog;
 byId('chart-axis').onchange = () => drawChart(shownRun?.profile);
-const meshNames = {'gmsh-tetra': '사면체 · Delaunay', 'tetra-hxt': '사면체 · HXT',
-  'hex-sweep': '육면체 스윕', 'hex-dominant': '헥스 도미넌트'};
+const meshNames = {'gmsh-tetra': 'Tetrahedral Delaunay (사면체)', 'tetra-hxt': 'Tetrahedral HXT (사면체)',
+  'hex-sweep': 'Hex Sweep (육면체 스윕)', 'hex-dominant': 'Hex Dominant (헥스 도미넌트)'};
 const stepLinks = [...document.querySelectorAll('[data-step]')];
 let qualityRun = '';
 let residualKey = '';
@@ -1274,7 +1338,14 @@ byId('archived-runs').onchange = refresh;
 function renderSpectrum(title, stats, reverse) {
   const section = document.createElement('section');
   const heading = document.createElement('h4');
-  heading.textContent = title + ' · 최소 ' + format(stats.min) + ' / 평균 ' + format(stats.mean) + ' / 최대 ' + format(stats.max);
+  heading.textContent = title;
+  const summary = document.createElement('dl');
+  summary.className = 'quality-readouts';
+  summary.append(...[['최소', stats.min], ['평균', stats.mean], ['최대', stats.max]]
+    .map(([name, value]) => description(name, format(value))));
+  const distribution = document.createElement('div');
+  distribution.className = 'quality-distribution';
+  distribution.setAttribute('aria-hidden', 'true');
   const bands = document.createElement('ul');
   bands.className = 'quality-bands';
   const grades = ['매우 낮음', '낮음', '보통', '양호', '우수'];
@@ -1284,12 +1355,23 @@ function renderSpectrum(title, stats, reverse) {
     const label = document.createElement('strong');
     label.textContent = grades[grade];
     item.dataset.grade = grade;
-    item.append(label, document.createElement('br'),
-      stats.bands[index] + '–' + stats.bands[index + 1], document.createElement('br'), format(count) + '셀');
+    const range = document.createElement('span');
+    range.textContent = stats.bands[index] + '–' + stats.bands[index + 1];
+    const value = document.createElement('span');
+    value.className = 'quality-count';
+    value.textContent = format(count) + '셀';
+    item.append(label, range, value);
     if (reverse) bands.prepend(item);
     else bands.append(item);
+    if (count > 0) {
+      const segment = document.createElement('span');
+      segment.dataset.grade = grade;
+      segment.style.flexGrow = count;
+      if (reverse) distribution.prepend(segment);
+      else distribution.append(segment);
+    }
   });
-  section.append(heading, bands);
+  section.append(heading, summary, distribution, bands);
   return section;
 }
 async function loadQuality(id) {

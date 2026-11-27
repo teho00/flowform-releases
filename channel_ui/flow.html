@@ -16,13 +16,13 @@
     <nav aria-label="작업공간"><a href="/cad">3D CAD</a><a href="/flow" aria-current="page">OpenFOAM CFD</a></nav>
   </header>
 
-  <main class="wrap"><div class="workspace-title"><h1>유동해석</h1>
+  <main class="wrap"><div class="workspace-title"><h1>Flow Analysis (유동해석)</h1>
     <nav class="section-jumps" aria-label="CFD 작업 단계">
-      <a href="#setup-title" data-step="setup"><span class="step-index" aria-hidden="true">01</span>형상·조건</a>
-      <a href="#mesh-results" data-step="mesh"><span class="step-index" aria-hidden="true">02</span>격자</a>
-      <a href="#run-progress" data-step="run"><span class="step-index" aria-hidden="true">03</span>실행</a>
-      <a href="#results-title" data-step="results"><span class="step-index" aria-hidden="true">04</span>결과</a>
-      <a href="#history-title" data-step="history"><span class="step-index" aria-hidden="true">05</span>실행 기록</a>
+      <a href="#setup-title" data-step="setup"><span class="step-index" aria-hidden="true">01</span><span class="step-name">Setup <small>(형상·조건)</small></span></a>
+      <a href="#mesh-results" data-step="mesh"><span class="step-index" aria-hidden="true">02</span><span class="step-name">Mesh <small>(격자)</small></span></a>
+      <a href="#run-progress" data-step="run"><span class="step-index" aria-hidden="true">03</span><span class="step-name">Run <small>(실행)</small></span></a>
+      <a href="#results-title" data-step="results"><span class="step-index" aria-hidden="true">04</span><span class="step-name">Results <small>(결과)</small></span></a>
+      <a href="#history-title" data-step="history"><span class="step-index" aria-hidden="true">05</span><span class="step-name">History <small>(실행 기록)</small></span></a>
     </nav></div>
     <p id="request-error" class="notice error" role="alert" hidden></p>
 
@@ -31,41 +31,41 @@
       <div class="sidebar">
         <section class="card panel" data-page="setup" aria-labelledby="setup-title">
           <div class="section-head">
-            <h2 id="setup-title">해석 조건</h2>
+            <h2 id="setup-title">Simulation Setup <small>(해석 조건)</small></h2>
             <button type="button" id="open-model" class="download secondary-button">CAD 프로젝트 열기</button>
             <input type="file" id="load-model" accept=".json" hidden>
           </div>
           <form id="flow-form">
             <fieldset id="setup-fields" disabled>
               <fieldset class="condition-group">
-                <legend>경계 조건</legend>
+                <legend>Boundary Conditions (경계 조건)</legend>
                 <label class="field">
-                  <span><i class="port-color inlet" aria-hidden="true"></i>입구 면</span>
+                  <span><i class="port-color inlet" aria-hidden="true"></i>Inlet (입구 면)</span>
                   <select id="inlet-face" required></select>
                 </label>
                 <label class="field">
-                  <span><i class="port-color outlet" aria-hidden="true"></i>출구 면</span>
+                  <span><i class="port-color outlet" aria-hidden="true"></i>Outlet (출구 면)</span>
                   <select id="outlet-face" required></select>
                 </label>
                 <p class="subtle">나머지 면에는 고정 벽과 무미끄럼 조건을 적용합니다.</p>
                 <div class="field-pair inlet-controls">
-                  <label class="field">입구 조건
+                  <label class="field">Inlet Condition (입구 조건)
                     <select id="inlet-condition">
-                      <option value="speed">속도</option>
-                      <option value="flow">체적 유량</option>
+                      <option value="speed">Velocity (속도)</option>
+                      <option value="flow">Volumetric Flow Rate (체적 유량)</option>
                     </select>
                   </label>
-                  <label class="field">입구 단위<select id="inlet-unit"></select></label>
                   <label class="field"><span id="inlet-value-label">입구 속도</span>
                     <input type="number" id="inlet-value" min="0" step="any" value="1" required>
                   </label>
+                  <label class="field">Unit (단위)<select id="inlet-unit"></select></label>
                 </div>
                 <p class="subtle" id="inlet-equivalent" hidden></p>
-                <div class="field-pair">
-                  <label class="field">출구 조건
+                <div class="field-pair outlet-controls">
+                  <label class="field">Outlet Condition (출구 조건)
                     <select id="outlet-mode">
-                      <option value="ambient">자유압력 경계 · 대기</option>
-                      <option value="target">목표 정압</option>
+                      <option value="ambient">Ambient Pressure (대기압 경계)</option>
+                      <option value="target">Static Pressure (목표 정압)</option>
                     </select>
                   </label>
                   <label class="field" id="outlet-target" hidden>출구 게이지 압력 (Pa)
@@ -74,12 +74,12 @@
                 </div>
               </fieldset>
               <fieldset class="condition-group">
-                <legend>유체 물성</legend>
+                <legend>Fluid Properties (유체 물성)</legend>
                 <label class="field">유체
                   <select id="fluid">
-                    <option value="air">공기</option>
-                    <option value="water">물</option>
-                    <option value="hydrogen">수소</option>
+                    <option value="air">Air (공기)</option>
+                    <option value="water">Water (물)</option>
+                    <option value="hydrogen">Hydrogen (수소)</option>
                     <option value="custom">직접 입력</option>
                   </select>
                 </label>
@@ -90,48 +90,57 @@
                   <label class="field">기준 절대압 (kPa)
                     <input type="number" id="reference-pressure" min="0.000000001" step="any" value="101.325" required>
                   </label>
-                  <label class="field">밀도 (kg/m³)
+                  <label class="field">Density (밀도) · kg/m³
                     <input type="number" id="rho" min="0.000000001" step="any" value="1.204" required>
                   </label>
-                  <label class="field">점성계수 (Pa·s)
+                  <label class="field">Viscosity (점성계수) · Pa·s
                     <input type="number" id="mu" min="0.000000000000001" step="any" value="0.00001825" required>
                   </label>
                 </div>
                 <p class="subtle">프리셋은 20 °C, 101.325 kPa 기준입니다. 온도·절대압은 조건에 기록되며, 비압축 해석에는 입력한 밀도와 점도가 적용됩니다.</p>
               </fieldset>
               <fieldset class="condition-group">
-                <legend>해석 및 격자</legend>
-                <label class="field">유동 모델
+                <legend>Solver &amp; Mesh (해석 및 격자)</legend>
+                <label class="field">Flow Model (유동 모델)
                   <select id="mode">
-                    <option value="steady">정상 · 비압축 단상 층류</option>
-                    <option value="transient">비정상 · 비압축 단상 층류</option>
+                    <option value="steady">Steady (정상) · 비압축 단상 층류</option>
+                    <option value="transient">Transient (비정상) · 비압축 단상 층류</option>
                   </select>
                 </label>
                 <label class="field">계산 장치
                   <select id="compute-backend">
                     <option value="cpu">CPU</option>
-                    <option value="gpu-pressure" disabled>GPU · 압력 계산 (CUDA)</option>
+                    <option value="gpu-pressure" disabled>GPU Pressure (GPU 압력 계산) · CUDA</option>
                   </select>
                 </label>
                 <div class="field-pair" id="transient-fields" hidden>
-                  <label class="field">종료 시간 (s)
+                  <label class="field">End Time (종료 시간) · s
                     <input type="number" id="end-time" min="0.000000001" step="any" value="0.1" required disabled>
                   </label>
-                  <label class="field">시간 스텝 수
+                  <label class="field">Time Steps (시간 스텝 수)
                     <input type="number" id="time-step" min="1" max="100000" step="1" value="100" required disabled>
                   </label>
                   <p id="time-step-preview" class="subtle"></p>
                   <label class="field">결과 저장 간격 (s)<input type="number" id="save-interval" min="0.000000001" step="any" placeholder="자동"></label>
-                  <fieldset id="schedule-fields" class="inlet-schedule" disabled>
-                    <legend>입구 유량 변경</legend>
-                    <div id="schedule"></div>
-                    <button type="button" id="schedule-add">변경 시점 추가</button>
-                  </fieldset>
+                  <div class="inlet-schedule">
+                    <button type="button" id="schedule-toggle" class="secondary-button schedule-toggle" aria-expanded="false" aria-controls="schedule-fields">Inlet Flow Schedule (입구 유량 변경)</button>
+                    <fieldset id="schedule-fields" class="schedule-fields" aria-labelledby="schedule-toggle" hidden disabled>
+                      <div id="schedule"></div>
+                      <button type="button" id="schedule-add">Add Change (변경 시점 추가)</button>
+                    </fieldset>
+                  </div>
                 </div>
-                <label class="field">목표 격자 길이 (mm)
+                <label class="field">Target Size (목표 격자 길이) · mm
                   <input type="number" id="mesh-size" min="0.0001" step="any" value="0.2" required>
                 </label>
-                <label class="field">격자 방식<select id="mesh-method"><option value="gmsh-tetra">사면체 · Delaunay</option><option value="tetra-hxt">사면체 · HXT</option><option value="hex-dominant">헥스 도미넌트 · 일정 직사각 단면</option><option value="hex-sweep">육면체 스윕 · 일정 직사각 단면</option></select></label>
+                <label class="field">Mesh Method (격자 방식)
+                  <select id="mesh-method">
+                    <option value="hex-dominant" selected>Hex Dominant (헥스 도미넌트)</option>
+                    <option value="hex-sweep">Hex Sweep (육면체 스윕)</option>
+                    <option value="tetra-hxt">Tetrahedral HXT (사면체)</option>
+                  </select>
+                </label>
+                <p class="subtle" id="mesh-method-note"></p>
                 <div id="sweep-settings" hidden><div class="field-pair"><label class="field">폭 방향 셀 수<input id="width-cells" type="number" min="2" max="512" placeholder="자동"></label>
                 <label class="field">두께 방향 셀 수<input id="height-cells" type="number" min="2" max="512" placeholder="자동"></label></div>
                 <p class="subtle" id="sweep-estimate"></p></div>
@@ -155,7 +164,7 @@
       <div class="workspace">
         <section class="card panel domain-panel" data-page="setup" aria-labelledby="domain-title">
           <div class="section-head">
-            <h2 id="domain-title">CAD 유체 체적</h2>
+            <h2 id="domain-title">Fluid Domain (CAD 유체 체적)</h2>
             <span class="badge" id="domain-volume" hidden></span>
           </div>
           <p id="domain-status" class="subtle" role="status">CAD 모델 불러오는 중</p>
@@ -183,61 +192,68 @@
 
         <section class="card panel" id="mesh-results" data-page="mesh" aria-labelledby="mesh-title" hidden>
           <div class="section-head mesh-heading">
-            <h2 id="mesh-title">생성된 격자</h2>
+            <h2 id="mesh-title">Generated Mesh (생성된 격자)</h2>
             <div class="downloads">
               <a id="mesh-link" class="download" download hidden>격자 다운로드</a>
               <a id="quality-link" class="download" download hidden>직교 품질 CSV</a>
               <a id="case-link" class="download" download hidden>OpenFOAM 케이스 다운로드</a>
             </div>
           </div>
-          <p id="mesh-quality-summary" class="mesh-quality-summary" hidden></p>
-          <div id="mesh-preview" hidden>
-            <div class="preview-tools">
-              <div class="axis-select">
-                <label for="mesh-section">격자 표시</label>
-                <select id="mesh-section">
-                  <option value="">전체 표면</option>
-                  <option value="quality">직교 품질 · 0.9 미달 위치</option>
-                  <option value="x">X 단면</option>
-                  <option value="y">Y 단면</option>
-                  <option value="z">Z 단면</option>
-                </select>
+          <dl id="mesh-quality-summary" class="metrics mesh-readouts" hidden></dl>
+          <div class="mesh-review-grid">
+            <div class="mesh-geometry">
+              <div id="mesh-preview" hidden>
+                <div class="preview-tools">
+                  <div class="axis-select">
+                    <label for="mesh-section">격자 표시</label>
+                    <select id="mesh-section">
+                      <option value="">전체 표면</option>
+                      <option value="quality">직교 품질 · 0.9 미달 위치</option>
+                      <option value="x">X 단면</option>
+                      <option value="y">Y 단면</option>
+                      <option value="z">Z 단면</option>
+                    </select>
+                  </div>
+                  <div class="view-buttons" aria-label="격자 보기 방향">
+                    <button type="button" data-mesh-view="iso">등각</button>
+                    <button type="button" data-mesh-view="top">상면</button>
+                    <button type="button" data-mesh-view="front">정면</button>
+                    <button type="button" data-mesh-view="left">−X 방향</button>
+                    <button type="button" id="mesh-section-view" hidden>단면 정면</button>
+                    <button type="button" id="mesh-fit">맞춤</button>
+                  </div>
+                </div>
+                <div id="mesh-slice" class="mesh-slice" hidden>
+                  <label for="mesh-position">단면 위치</label>
+                  <input type="range" id="mesh-position" min="0" max="1000" value="500">
+                  <output id="mesh-position-value" for="mesh-position"></output>
+                </div>
+                <div class="domain-viewport mesh-viewport">
+                  <canvas id="mesh-canvas" role="img" aria-label="생성된 격자"></canvas>
+                  <span data-view-axis="x" aria-hidden="true">X</span>
+                  <span data-view-axis="y" aria-hidden="true">Y</span>
+                  <span data-view-axis="z" aria-hidden="true">Z</span>
+                </div>
+                <div class="mesh-key" id="mesh-patch-key" aria-label="경계면 색상">
+                  <span><i class="port-color inlet" aria-hidden="true"></i>입구</span>
+                  <span><i class="port-color outlet" aria-hidden="true"></i>출구</span>
+                  <span><i class="port-color wall" aria-hidden="true"></i>벽</span>
+                </div>
+                <p class="subtle preview-caption">드래그로 회전 · Shift + 드래그로 이동 · 휠로 확대</p>
               </div>
-              <div class="view-buttons" aria-label="격자 보기 방향">
-                <button type="button" data-mesh-view="iso">등각</button>
-                <button type="button" data-mesh-view="top">상면</button>
-                <button type="button" data-mesh-view="front">정면</button>
-                <button type="button" data-mesh-view="left">−X 방향</button>
-                <button type="button" id="mesh-section-view" hidden>단면 정면</button>
-                <button type="button" id="mesh-fit">맞춤</button>
-              </div>
+              <p id="mesh-preview-status" class="subtle" role="status" hidden></p>
             </div>
-            <div id="mesh-slice" class="mesh-slice" hidden>
-              <label for="mesh-position">단면 위치</label>
-              <input type="range" id="mesh-position" min="0" max="1000" value="500">
-              <output id="mesh-position-value" for="mesh-position"></output>
-            </div>
-            <div class="domain-viewport mesh-viewport">
-              <canvas id="mesh-canvas" role="img" aria-label="생성된 격자"></canvas>
-              <span data-view-axis="x" aria-hidden="true">X</span>
-              <span data-view-axis="y" aria-hidden="true">Y</span>
-              <span data-view-axis="z" aria-hidden="true">Z</span>
-            </div>
-            <div class="mesh-key" id="mesh-patch-key" aria-label="경계면 색상">
-              <span><i class="port-color inlet" aria-hidden="true"></i>입구</span>
-              <span><i class="port-color outlet" aria-hidden="true"></i>출구</span>
-              <span><i class="port-color wall" aria-hidden="true"></i>벽</span>
-            </div>
-            <p class="subtle preview-caption">드래그로 회전 · Shift + 드래그로 이동 · 휠로 확대</p>
+            <section class="mesh-assessment" aria-labelledby="quality-title">
+              <h3 id="quality-title">Mesh Quality (격자 품질 분포)</h3>
+              <p class="subtle">Orthogonality(직교성)는 1에, Skewness(각도 왜곡도)는 0에 가까울수록 좋습니다. 직교성 목표는 0.9 이상입니다.</p>
+              <p id="quality-status" role="status" class="subtle"></p>
+              <div id="quality-spectrum"></div>
+            </section>
           </div>
-          <p id="mesh-preview-status" class="subtle" role="status" hidden></p>
-          <section aria-labelledby="quality-title">
-            <h3 id="quality-title">격자 품질 분포</h3>
-            <p class="subtle">Orthogonality(직교성)는 1에, Skewness(각도 왜곡도)는 0에 가까울수록 좋습니다. 직교성 목표는 0.9 이상입니다.</p>
-            <p id="quality-status" role="status" class="subtle"></p>
-            <div id="quality-spectrum"></div>
-          </section>
-          <dl id="mesh-data" class="facts"></dl>
+          <details class="dashboard-detail" id="mesh-details" hidden>
+            <summary>Mesh Details (격자 상세)</summary>
+            <dl id="mesh-data" class="facts"></dl>
+          </details>
           <p class="subtle" id="mesh-note"></p>
           <div class="mesh-solve-action">
             <button type="button" class="primary" id="solve-mesh-button" disabled>이 격자로 해석 실행</button>
@@ -247,13 +263,12 @@
 
         <section class="card panel" id="run-progress" data-page="run" aria-labelledby="progress-title">
           <div class="section-head">
-            <h2 id="progress-title">실행 상태</h2>
+            <h2 id="progress-title">Run Status (실행 상태)</h2>
             <div class="run-toolbar">
               <button id="stop-run" class="stop-button" type="button" hidden>해석 중단</button>
               <span id="run-status" class="badge" role="status">대기</span>
             </div>
           </div>
-          <button id="open-run-output" type="button" hidden>결과 보기</button>
           <p id="run-description" class="subtle">입구와 출구를 지정한 뒤 격자를 생성하거나 유동해석을 실행하세요.</p>
           <div class="review-tools" id="run-management" hidden><label>실행 이름 <input id="run-name" maxlength="80"></label>
             <button type="button" id="rename-run">이름 저장</button>
@@ -266,9 +281,10 @@
             <li data-stage="foamRun"><span>솔버 실행</span><small>대기</small></li>
             <li data-stage="postprocess"><span>후처리</span><small>대기</small></li>
           </ol>
+          <button id="open-run-output" class="secondary-button" type="button" hidden>결과 보기</button>
           <div id="run-residuals">
             <section id="solver-monitor" class="chart-section" aria-labelledby="residual-heading" hidden>
-              <h3 id="residual-heading">솔버 잔차 그래프</h3>
+              <h3 id="residual-heading">Solver Residuals (솔버 잔차 그래프)</h3>
               <p id="solver-step" class="subtle" role="status" hidden></p>
               <p id="residual-status" class="subtle" role="status"></p>
               <div id="residual-chart"></div>
@@ -279,7 +295,16 @@
             <button type="submit">다음 구간에 적용</button>
             <p id="live-message" role="status"></p>
           </form>
-          <p id="run-error" class="notice error" role="alert" hidden></p>
+          <section class="notice error run-failure" id="run-error" aria-labelledby="run-error-title" hidden>
+            <div role="alert">
+              <h3 id="run-error-title"></h3>
+              <p id="run-error-message"></p>
+              <ul id="run-error-facts" hidden></ul>
+              <p id="run-error-advice" hidden></p>
+              <pre id="run-error-excerpt" hidden></pre>
+            </div>
+            <button type="button" class="secondary-button" id="run-error-log" hidden>원문 로그 보기</button>
+          </section>
           <details class="log-panel" id="log-panel" hidden>
             <summary>실행 로그</summary>
             <label for="log-select" class="log-picker">파일 <select id="log-select"></select></label>
@@ -289,26 +314,20 @@
 
         <section class="card panel" data-page="results" aria-labelledby="results-title">
           <div class="section-head">
-            <h2 id="results-title">유동해석 결과</h2>
+            <h2 id="results-title">Simulation Results (유동해석 결과)</h2>
             <a id="csv-link" class="download" download hidden>CSV 다운로드</a>
           </div>
           <p id="results-empty" class="subtle">유동해석이 완료되면 입구와 출구의 평균 압력 및 셀별 속도를 표시합니다.</p>
           <div id="results-data" hidden>
-            <details id="mesh-compare" hidden>
-              <summary>같은 조건의 정상 해석 비교</summary>
-              <button type="button" id="refine-three">현재 방식으로 3단계 계산</button>
-              <p class="subtle" id="refine-status" role="status"></p>
-              <label><input type="checkbox" id="profiles-compare"> X 중앙 단면 · 높이별 평균 속력 비교</label>
-              <div id="compare-data" class="comparison" aria-live="polite"></div>
-            </details>
             <p id="sample-result-note" class="notice" hidden></p>
             <p class="subtle" id="convergence-note" hidden></p>
-            <div id="result-residuals"></div>
-            <dl class="metrics" id="pressure-data"></dl>
-            <dl class="facts" id="field-data"></dl>
+            <section id="result-readouts" class="result-readouts" aria-label="해석 결과 요약" hidden>
+              <dl class="metrics result-pressure" id="pressure-data"></dl>
+              <dl class="facts result-facts" id="field-data"></dl>
+            </section>
             <section id="results-contour" class="chart-section" aria-labelledby="contour-heading" hidden>
               <div class="section-head">
-                <h3 id="contour-heading">유동 컨투어</h3>
+                <h3 id="contour-heading">Contours (유동 컨투어)</h3>
                 <span id="frame-time"></span>
                 <span class="badge" id="contour-sample" data-tone="warning" hidden>시험용 데이터</span>
               </div>
@@ -324,8 +343,8 @@
                   <div class="axis-select">
                     <label for="contour-field">물리량</label>
                     <select id="contour-field">
-                      <option value="pressure">게이지 압력</option>
-                      <option value="speed">속력</option>
+                      <option value="pressure">Gauge Pressure (게이지 압력)</option>
+                      <option value="speed">Speed (속력)</option>
                     </select>
                   </div>
                   <div class="axis-select">
@@ -362,9 +381,17 @@
               </div>
               <p id="contour-status" class="subtle" role="status"></p>
             </section>
+            <div id="result-residuals"></div>
+            <details class="dashboard-detail" id="mesh-compare" hidden>
+              <summary>같은 조건의 정상 해석 비교</summary>
+              <button type="button" id="refine-three">현재 방식으로 3단계 계산</button>
+              <p class="subtle" id="refine-status" role="status"></p>
+              <label><input type="checkbox" id="profiles-compare"> X 중앙 단면 · 높이별 평균 속력 비교</label>
+              <div id="compare-data" class="comparison" aria-live="polite"></div>
+            </details>
             <div class="chart-section">
               <div class="section-head">
-                <h3 id="chart-heading">셀 중심 속도 분포</h3>
+                <h3 id="chart-heading">Cell-Center Velocity (셀 중심 속도 분포)</h3>
                 <div class="axis-select">
                   <label for="chart-axis">좌표</label>
                   <select id="chart-axis">
@@ -383,7 +410,7 @@
     </div>
     <section class="card environment">
       <details id="environment">
-        <summary>실행 환경 <span id="environment-caption" class="subtle"></span> <span id="environment-badge" class="badge" role="status">실행 환경 확인 중</span></summary>
+        <summary>Runtime (실행 환경) <span id="environment-caption" class="subtle"></span> <span id="environment-badge" class="badge" role="status">실행 환경 확인 중</span></summary>
         <div class="environment-body">
           <p><a class="download" href="/">평행 평판 예제 검증</a></p>
           <dl id="command-list" class="commands"></dl>
@@ -402,16 +429,16 @@
         <div class="field-pair">
           <label class="field">유체
             <select id="saved-fluid">
-              <option value="air">공기</option>
-              <option value="water">물</option>
-              <option value="hydrogen">수소</option>
+              <option value="air">Air (공기)</option>
+              <option value="water">Water (물)</option>
+              <option value="hydrogen">Hydrogen (수소)</option>
               <option value="custom">직접 입력</option>
             </select>
           </label>
-          <label class="field">유동 모델
+          <label class="field">Flow Model (유동 모델)
             <select id="saved-mode">
-              <option value="steady">정상 · 비압축 단상 층류</option>
-              <option value="transient">비정상 · 비압축 단상 층류</option>
+              <option value="steady">Steady (정상) · 비압축 단상 층류</option>
+              <option value="transient">Transient (비정상) · 비압축 단상 층류</option>
             </select>
           </label>
         </div>
@@ -422,56 +449,58 @@
           <label class="field">기준 절대압 (kPa)
             <input type="number" id="saved-reference-pressure" min="0.000000001" step="any" value="101.325" required>
           </label>
-          <label class="field">밀도 (kg/m³)
+          <label class="field">Density (밀도) · kg/m³
             <input type="number" id="saved-rho" min="0.000000001" step="any" required>
           </label>
-          <label class="field">점성계수 (Pa·s)
+          <label class="field">Viscosity (점성계수) · Pa·s
             <input type="number" id="saved-mu" min="0.000000000000001" step="any" required>
           </label>
         </div>
         <div class="field-pair inlet-controls">
-          <label class="field">입구 조건
+          <label class="field">Inlet Condition (입구 조건)
             <select id="saved-inlet-condition">
-              <option value="speed">속도</option>
-              <option value="flow">체적 유량</option>
+              <option value="speed">Velocity (속도)</option>
+              <option value="flow">Volumetric Flow Rate (체적 유량)</option>
             </select>
           </label>
-          <label class="field">입구 단위<select id="saved-inlet-unit"></select></label>
-                  <label class="field"><span id="saved-inlet-value-label">입구 속도</span>
+          <label class="field"><span id="saved-inlet-value-label">입구 속도</span>
             <input type="number" id="saved-inlet-value" min="0" step="any" required>
           </label>
+          <label class="field">Unit (단위)<select id="saved-inlet-unit"></select></label>
         </div>
-        <div class="field-pair">
-                  <label class="field">출구 조건
-                    <select id="saved-outlet-mode">
-                      <option value="ambient">자유압력 경계 · 대기</option>
-                      <option value="target">목표 정압</option>
-                    </select>
-                  </label>
-                  <label class="field" id="saved-outlet-target" hidden>출구 게이지 압력 (Pa)
-                    <input type="number" id="saved-outlet-pressure" step="any" value="0" required disabled>
-                  </label>
-                </div>
+        <div class="field-pair outlet-controls">
+          <label class="field">Outlet Condition (출구 조건)
+            <select id="saved-outlet-mode">
+              <option value="ambient">Ambient Pressure (대기압 경계)</option>
+              <option value="target">Static Pressure (목표 정압)</option>
+            </select>
+          </label>
+          <label class="field" id="saved-outlet-target" hidden>출구 게이지 압력 (Pa)
+            <input type="number" id="saved-outlet-pressure" step="any" value="0" required disabled>
+          </label>
+        </div>
         <label class="field">계산 장치
           <select id="saved-compute-backend">
             <option value="cpu">CPU</option>
-            <option value="gpu-pressure" disabled>GPU · 압력 계산 (CUDA)</option>
+            <option value="gpu-pressure" disabled>GPU Pressure (GPU 압력 계산) · CUDA</option>
           </select>
         </label>
         <div class="field-pair" id="saved-transient-fields" hidden>
-          <label class="field">종료 시간 (s)
+          <label class="field">End Time (종료 시간) · s
             <input type="number" id="saved-end-time" min="0.000000001" step="any" required disabled>
           </label>
-          <label class="field">시간 스텝 수
+          <label class="field">Time Steps (시간 스텝 수)
             <input type="number" id="saved-time-step" min="1" max="100000" step="1" required disabled>
           </label>
           <p id="saved-time-step-preview" class="subtle"></p>
                   <label class="field">결과 저장 간격 (s)<input type="number" id="saved-save-interval" min="0.000000001" step="any" placeholder="자동"></label>
-                  <fieldset id="saved-schedule-fields" class="inlet-schedule" disabled>
-                    <legend>입구 유량 변경</legend>
-                    <div id="saved-schedule"></div>
-                    <button type="button" id="saved-schedule-add">변경 시점 추가</button>
-                  </fieldset>
+          <div class="inlet-schedule">
+            <button type="button" id="saved-schedule-toggle" class="secondary-button schedule-toggle" aria-expanded="false" aria-controls="saved-schedule-fields">Inlet Flow Schedule (입구 유량 변경)</button>
+            <fieldset id="saved-schedule-fields" class="schedule-fields" aria-labelledby="saved-schedule-toggle" hidden disabled>
+              <div id="saved-schedule"></div>
+              <button type="button" id="saved-schedule-add">Add Change (변경 시점 추가)</button>
+            </fieldset>
+          </div>
         </div>
       </fieldset>
       <div class="mesh-dialog-actions">

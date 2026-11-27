@@ -21,6 +21,7 @@ RUNS_PATH = "/api/flow/runs"
 SAVED_SETUP = {
     "mesh_only": True,
     "mesh_mm": 0.2,
+    "mesh_method": "hex-sweep",
     "fluid": "air",
     "rho": 1.2,
     "mu": 1.8e-5,
@@ -81,7 +82,7 @@ def create_saved_mesh(runs_dir):
     }
     (directory / "run.json").write_text(json.dumps(record), encoding="utf-8")
     (case / "setup.json").write_text(json.dumps(SAVED_SETUP), encoding="utf-8")
-    (case / "mesh.json").write_text('{"cells": 1, "inlet_area_mm2": 0.5}', encoding="utf-8")
+    (case / "mesh.json").write_text('{"method": "hex-sweep", "cells": 1, "inlet_area_mm2": 0.5}', encoding="utf-8")
     (case / "domain.step").write_bytes(b"ISO-10303-21;")
     (case / "domain.msh").write_bytes(MSH)
     return directory
@@ -129,8 +130,10 @@ def write_converted_mesh(case):
 
 
 class FakeSolver:
-    def __init__(self, *, mesh_ok=True):
+    def __init__(self, *, mesh_ok=True, tetrahedra=0, solver_error=None):
         self.mesh_ok = mesh_ok
+        self.tetrahedra = tetrahedra
+        self.solver_error = solver_error
         self.steps = []
 
     def capture(self, store, command, case, log):
@@ -144,7 +147,12 @@ class FakeSolver:
             output = "Converted mesh"
         elif name == "checkMesh":
             output = "Mesh OK." if self.mesh_ok else "Mesh OK. was not reported\nFailed 1 mesh checks."
+            if self.tetrahedra:
+                output += f"\n    tetrahedra: {self.tetrahedra}"
         elif name == "foamRun":
+            if self.solver_error:
+                log.write_text(self.solver_error, encoding="utf-8")
+                return 1
             instant = case / "0.04"
             instant.mkdir()
             (instant / "U").write_text("internalField uniform (1.25 0 0);", encoding="utf-8")
@@ -249,6 +257,26 @@ class SavedMeshFlowTest(unittest.TestCase):
         self.assertEqual([step[2][0] for step in solver.steps], ["gmshToFoam", "checkMesh"])
         self.assertTrue(detail["files"]["mesh"])
         self.assertFalse(detail["files"]["csv"])
+        self.assertEqual(detail["failure"]["message"], "OpenFOAM 격자 검사에서 1개 항목을 통과하지 못했습니다.")
+        self.assertEqual(detail["failure"]["log"], "log.checkMesh")
+
+    def test_solver_failure_explains_transient_divergence(self):
+        solver = FakeSolver(solver_error=(
+            "Courant Number mean: 4 max: 20000\nTime = 0.002s\n"
+            "Courant Number mean: 500 max: 2e8\nTime = 0.004s\n"
+            "--> FOAM FATAL ERROR: \nGPU pressure residual 1.5e-05 failed convergence for p\n\nFOAM exiting\n"
+        ))
+        with local_server(self.runs_dir, solver_available=True, capture=solver.capture) as url:
+            status, accepted = self.start(url, step_count=20)
+            self.assertEqual(status, 202, accepted)
+            detail = self.wait_for_run(url, accepted["id"])
+        failure = detail["failure"]
+        self.assertEqual(failure["title"], "비정상 해석 수치 발산")
+        self.assertIn("Δt 0.002 s", " ".join(failure["facts"]))
+        self.assertIn("20,000", " ".join(failure["facts"]))
+        self.assertEqual(failure["excerpt"], "GPU pressure residual 1.5e-05 failed convergence for p")
+        self.assertIn("입구 유량과 단위", failure["advice"])
+        self.assertEqual(failure["log"], "log.foamRun")
 
     def test_unknown_and_unavailable_runs_do_not_queue(self):
         solver = FakeSolver()
@@ -259,6 +287,36 @@ class SavedMeshFlowTest(unittest.TestCase):
             self.assertEqual(status, 200)
             self.assertEqual([run["id"] for run in history["runs"]], [SOURCE_ID])
         self.assertEqual(solver.steps, [])
+
+    def test_saved_tetrahedral_mesh_can_be_selected_for_reuse(self):
+        (self.source / "case" / "mesh.json").write_text(
+            '{"method": "tetra-hxt", "cells": 1, "inlet_area_mm2": 0.5}', encoding="utf-8"
+        )
+        solver = FakeSolver(tetrahedra=1)
+        with local_server(self.runs_dir, solver_available=True, capture=solver.capture) as url:
+            status, detail = get_json(url, f"{RUNS_PATH}/{SOURCE_ID}")
+            self.assertEqual(status, 200)
+            self.assertTrue(detail["files"]["mesh"])
+            self.assertTrue(detail["mesh_reusable"])
+            status, accepted = self.start(url)
+            self.assertEqual(status, 202, accepted)
+            self.assertEqual(self.wait_for_run(url, accepted["id"])["status"], "complete")
+
+    def test_refinement_rejects_unknown_meshing_method(self):
+        solver = FakeSolver()
+        with local_server(self.runs_dir, solver_available=True, capture=solver.capture) as url:
+            self.assertEqual(self.start(url, mode="steady", refine=True, mesh_method="unknown")[0], 400)
+        self.assertEqual(solver.steps, [])
+
+    def test_tetrahedral_cells_stop_the_solver_even_with_hex_metadata(self):
+        solver = FakeSolver(tetrahedra=1)
+        with local_server(self.runs_dir, solver_available=True, capture=solver.capture) as url:
+            status, accepted = self.start(url)
+            self.assertEqual(status, 202)
+            detail = self.wait_for_run(url, accepted["id"])
+        self.assertEqual(detail["status"], "failed")
+        self.assertIn("사면체", detail["error"])
+        self.assertEqual([step[2][0] for step in solver.steps], ["gmshToFoam", "checkMesh"])
 
 
 if __name__ == "__main__":
